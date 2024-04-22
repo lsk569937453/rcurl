@@ -2,7 +2,7 @@ use std::str::FromStr;
 #[macro_use]
 extern crate anyhow;
 #[macro_use]
-extern crate log;
+extern crate tracing;
 use clap::Parser;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
@@ -15,9 +15,7 @@ use tracing::Level;
 mod http;
 use crate::http::handler::handle_response;
 use bytes::Bytes;
-use env_logger::Builder;
 use http_body_util::{BodyExt, Empty, Full};
-use log::LevelFilter;
 use rustls::client::danger::HandshakeSignatureValid;
 use rustls::client::danger::ServerCertVerifier;
 use rustls::client::WebPkiServerVerifier as WebPkiVerifier;
@@ -185,15 +183,14 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     let cli: Cli = Cli::parse();
-    let (log_level_hyper, log_level_rustls) = if cli.debug {
-        (Level::TRACE, LevelFilter::Trace)
+    let (log_level_hyper) = if cli.debug {
+        (Level::TRACE)
     } else {
-        (Level::INFO, LevelFilter::Info)
+        (Level::INFO)
     };
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(log_level_hyper)
         .finish();
-    Builder::new().filter_level(log_level_rustls).init();
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
     if let Err(e) = do_request(cli).await {
