@@ -279,64 +279,65 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     }
     let port = uri.port_u16().unwrap_or(default_port);
     let addr = format!("{}:{}", host, port);
-    let stream = TcpStream::connect(addr).await?;
-    let addr = stream.peer_addr()?;
-    let request_future = if uri.scheme_str() == Some("https") {
-        let connector = TlsConnector::from(Arc::new(tls_config));
-        let domain = pki_types::ServerName::try_from(host)
-            .map_err(|e| anyhow!("{}", e))?
-            .to_owned();
-        let tls_stream = connector.connect(domain, stream).await?;
-        let stream_io = TokioIo::new(tls_stream);
+    let stream = TcpStream::connect(addr.clone()).await?;
+    let local_addr = stream.local_addr()?.to_string();
+    let span = tracing::info_span!("Rcurl");
+    let _enter = span.enter();
+    let request_future = {
+        trace!("Start request");
+        let fut = if uri.scheme_str() == Some("https") {
+            let connector = TlsConnector::from(Arc::new(tls_config));
+            let domain = pki_types::ServerName::try_from(host)
+                .map_err(|e| anyhow!("{}", e))?
+                .to_owned();
+            let tls_stream = connector.connect(domain, stream).await?;
+            let stream_io = TokioIo::new(tls_stream);
 
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io).await?;
-        let join_handler = tokio::task::spawn(async move {
-            if let Err(err) = conn.instrument(info_span!("echo", %addr)).await {
-                println!("Connection failed: {:?}", err);
-            }
-        });
-        sender.send_request(request)
-    } else {
-        let stream_io = TokioIo::new(stream);
+            let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io)
+                .instrument(info_span!("Https Handshake"))
+                .await?;
+            tokio::task::spawn(async move {
+                if let Err(err) = conn
+                    .instrument(info_span!(
+                        "rcurl",
+                        localAddr=%local_addr,
+                         remoteAddr=addr,
 
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io).await?;
-        tokio::task::spawn(async move {
-            if let Err(err) = conn.instrument(info_span!("echo", %addr)).await {
-                println!("Connection failed: {:?}", err);
-            }
-        });
-        sender.send_request(request)
+                    ))
+                    .await
+                {
+                    println!("Connection failed: {:?}", err);
+                }
+            });
+            sender.send_request(request)
+        } else {
+            let stream_io = TokioIo::new(stream);
+
+            let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io)
+                .instrument(info_span!("Http Handshake"))
+                .await?;
+            tokio::task::spawn(
+                async move {
+                    if let Err(err) = conn.await {
+                        println!("Connection failed: {:?}", err);
+                    }
+                }
+                .instrument(
+                    info_span!(
+                        "addr",
+                        localAddr=%local_addr,
+                        remoteAddr=addr,
+
+                    )
+                    .or_current(),
+                ),
+            );
+            sender.send_request(request)
+        };
+        fut
     };
-    // let connector = TlsConnector::from(Arc::new(tls_config));
-    // let domain = pki_types::ServerName::try_from(host)
-    //     .map_err(|e| anyhow!("{}", e))?
-    //     .to_owned();
-    // let kk = connector.connect(domain, stream).await?;
-    // let stream_io = TokioIo::new(kk);
-
-    // let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io).await?;
-    // tokio::task::spawn(async move {
-    //     if let Err(err) = conn.await {
-    //         println!("Connection failed: {:?}", err);
-    //     }
-    // });
-
-    // let request_future = sender.send_request(request);
     let timeout_future = timeout(Duration::from_secs(5), request_future).await;
-    // if let Ok(Ok(res)) = timeout_future {
-    //     if cli.debug {
-    //         let status = res.status();
-    //         println!("< {:?} {}", res.version(), status);
-    //         for (key, value) in res.headers().iter() {
-    //             println!("< {}: {}", key, value.to_str()?);
-    //         }
-    //     }
-    //     handle_response(cli.file_path_option, res).await?;
-    //     return Ok(());
-    // } else {
-    //     error!("Request timeout in 5 seconds ");
-    //     Ok(())
-    // }
+
     match timeout_future {
         Ok(res_option) => match res_option {
             Ok(res) => {
@@ -361,17 +362,3 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         }
     }
 }
-// pub async fn handle_stream<T>(stream: T) -> Result<(), anyhow::Error>
-// where
-//     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::marker::Send + 'static,
-// {
-//     let stream_io = TokioIo::new(stream);
-
-//     let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io).await?;
-//     tokio::task::spawn(async move {
-//         if let Err(err) = conn.await {
-//             println!("Connection failed: {:?}", err);
-//         }
-//     });
-//     Ok(())
-// }
