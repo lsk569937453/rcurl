@@ -256,6 +256,9 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         "host",
         HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
     );
+    request
+        .headers_mut()
+        .append("User-Agent", HeaderValue::from_str("rcurl/0.0.6")?);
     for x in cli.headers {
         let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();
         if split.len() == 2 {
