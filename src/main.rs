@@ -1,3 +1,4 @@
+use std::os::windows::io::AsSocket;
 use std::str::FromStr;
 #[macro_use]
 extern crate anyhow;
@@ -11,7 +12,8 @@ use rustls::RootCertStore;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
-use tracing::Level;
+use tracing::instrument::WithSubscriber;
+use tracing::{Instrument, Level};
 mod http;
 use crate::http::handler::handle_response;
 use bytes::Bytes;
@@ -183,16 +185,14 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     let cli: Cli = Cli::parse();
-    let (log_level_hyper) = if cli.debug {
-        (Level::TRACE)
-    } else {
-        (Level::INFO)
-    };
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(log_level_hyper)
-        .finish();
+    let log_level_hyper = if cli.debug { Level::TRACE } else { Level::INFO };
 
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    tracing_subscriber::fmt()
+        // Configure formatting settings.
+        .with_level(true)
+        .with_max_level(log_level_hyper)
+        // Set the subscriber as the default.
+        .init();
     if let Err(e) = do_request(cli).await {
         error!("{}", e);
     }
@@ -280,17 +280,18 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     let port = uri.port_u16().unwrap_or(default_port);
     let addr = format!("{}:{}", host, port);
     let stream = TcpStream::connect(addr).await?;
+    let addr = stream.peer_addr()?;
     let request_future = if uri.scheme_str() == Some("https") {
         let connector = TlsConnector::from(Arc::new(tls_config));
         let domain = pki_types::ServerName::try_from(host)
             .map_err(|e| anyhow!("{}", e))?
             .to_owned();
-        let kk = connector.connect(domain, stream).await?;
-        let stream_io = TokioIo::new(kk);
+        let tls_stream = connector.connect(domain, stream).await?;
+        let stream_io = TokioIo::new(tls_stream);
 
         let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io).await?;
-        tokio::task::spawn(async move {
-            if let Err(err) = conn.await {
+        let join_handler = tokio::task::spawn(async move {
+            if let Err(err) = conn.instrument(info_span!("echo", %addr)).await {
                 println!("Connection failed: {:?}", err);
             }
         });
@@ -300,7 +301,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
 
         let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io).await?;
         tokio::task::spawn(async move {
-            if let Err(err) = conn.await {
+            if let Err(err) = conn.instrument(info_span!("echo", %addr)).await {
                 println!("Connection failed: {:?}", err);
             }
         });
