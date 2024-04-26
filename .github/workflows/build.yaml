@@ -11,6 +11,8 @@ permissions:
   packages: write
 jobs:
   release:
+    env:
+        RUSTFLAGS: '--cfg hyper_unstable_tracing'
     strategy:
       matrix:
         platform:
