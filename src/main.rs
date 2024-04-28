@@ -1,4 +1,3 @@
-use std::os::windows::io::AsSocket;
 use std::str::FromStr;
 #[macro_use]
 extern crate anyhow;
