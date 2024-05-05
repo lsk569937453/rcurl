@@ -102,18 +102,16 @@ impl ServerCertVerifier for NoHostnameTlsVerifier {
             _now,
         ) {
             Ok(res) => Ok(res),
-            Err(e) => {
-                return match e {
-                    rustls::Error::InvalidCertificate(reason) => {
-                        if reason == CertificateError::NotValidForName {
-                            Ok(rustls::client::danger::ServerCertVerified::assertion())
-                        } else {
-                            Err(rustls::Error::InvalidCertificate(reason))
-                        }
+            Err(e) => match e {
+                rustls::Error::InvalidCertificate(reason) => {
+                    if reason == CertificateError::NotValidForName {
+                        Ok(rustls::client::danger::ServerCertVerified::assertion())
+                    } else {
+                        Err(rustls::Error::InvalidCertificate(reason))
                     }
-                    _ => Err(e),
                 }
-            }
+                _ => Err(e),
+            },
         }
     }
 
@@ -207,22 +205,20 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         let verifier = WebPkiVerifier::builder(Arc::new(root_cert_store))
             .build()
             .map_err(|e| anyhow!("{}", e))?;
-        let config = ClientConfig::builder()
+        ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
-            .with_no_client_auth();
-        config
+            .with_no_client_auth()
     } else {
         let mut root_cert_store = RootCertStore::empty();
         root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         let verifier = WebPkiVerifier::builder(Arc::new(root_cert_store))
             .build()
             .map_err(|e| anyhow!("{}", e))?;
-        let config = ClientConfig::builder()
+        ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
-            .with_no_client_auth();
-        config
+            .with_no_client_auth()
     };
 
     if cli.skip_certificate_validate {
@@ -235,12 +231,10 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     let host = uri.host().expect("uri has no host");
     let default_port = if let Some(port) = uri.port_u16() {
         port
+    } else if uri.scheme_str() == Some("https") {
+        443
     } else {
-        if uri.scheme_str() == Some("https") {
-            443
-        } else {
-            80
-        }
+        80
     };
     let body = cli
         .body_option
@@ -279,6 +273,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     let port = uri.port_u16().unwrap_or(default_port);
     let addr = format!("{}:{}", host, port);
     let stream = TcpStream::connect(addr.clone()).await?;
+    let remote_addr = stream.peer_addr()?.to_string();
     let local_addr = stream.local_addr()?.to_string();
     let span = tracing::info_span!("Rcurl");
     let _enter = span.enter();
@@ -300,7 +295,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
                     .instrument(info_span!(
                         "rcurl",
                         localAddr=%local_addr,
-                         remoteAddr=addr,
+                         remoteAddr=remote_addr,
 
                     ))
                     .await
@@ -325,7 +320,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
                     info_span!(
                         "addr",
                         localAddr=%local_addr,
-                        remoteAddr=addr,
+                        remoteAddr=remote_addr,
 
                     )
                     .or_current(),
