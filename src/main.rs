@@ -3,6 +3,7 @@ use std::str::FromStr;
 extern crate anyhow;
 #[macro_use]
 extern crate tracing;
+use clap::builder::Str;
 use clap::Parser;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
@@ -168,7 +169,7 @@ struct Cli {
     certificate_path_option: Option<String>,
 
     /// The downloading file path .
-    #[arg(short = 'o', long)]
+    #[arg(global = true, short = 'O', long, default_missing_value = "none")]
     file_path_option: Option<String>,
 
     /// Skip certificate validation.
@@ -342,6 +343,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
                         println!("< {}: {}", key, value.to_str()?);
                     }
                 }
+                println!("handle response");
                 handle_response(cli.file_path_option, res).await?;
                 return Ok(());
             }
