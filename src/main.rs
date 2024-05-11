@@ -171,7 +171,7 @@ struct Cli {
     certificate_path_option: Option<String>,
 
     /// The downloading file path .
-    #[arg(short = 'O', long)]
+    #[arg(global = true, short = 'O', long, default_missing_value = "none")]
     file_path_option: Option<String>,
 
     /// Skip certificate validation.
@@ -180,9 +180,6 @@ struct Cli {
     /// The debug switch.
     #[arg(short = 'v', long)]
     debug: bool,
-}
-fn default_valuexx() -> Option<String> {
-    Some(String::from(""))
 }
 
 #[tokio::main]

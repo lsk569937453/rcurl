@@ -29,9 +29,10 @@ pub async fn handle_response(
         .ok_or(anyhow!("Can not parse content_length!"))?
         .to_str()?
         .parse::<u64>()?;
-    let incoming = res.into_body();
-    let mut body_streaming = BodyStream::new(incoming);
+
     if let Some(file_path) = file_path_option {
+        let incoming = res.into_body();
+        let mut body_streaming = BodyStream::new(incoming);
         let mut downloaded = 0;
         let total_size = content_length;
         let mut file = OpenOptions::new()
@@ -56,10 +57,10 @@ pub async fn handle_response(
         if content_length > 1024 * 1024 * 100 {
             return Err(anyhow!("The content_length is large than 100MB!"));
         }
-
-        // let dst = body.copy_to_bytes(content_length as usize);
-        // let response_string = String::from_utf8_lossy(&dst);
-        // println!("{}", response_string);
+        let mut body = res.collect().await?.aggregate();
+        let dst = body.copy_to_bytes(content_length as usize);
+        let response_string = String::from_utf8_lossy(&dst);
+        println!("{}", response_string);
     }
 
     Ok(())
