@@ -192,6 +192,7 @@ async fn main() {
         // Set the subscriber as the default.
         .init();
     if let Err(e) = do_request(cli).await {
+        println!("{}", e);
         error!("{}", e);
     }
 }
@@ -343,7 +344,6 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
                         println!("< {}: {}", key, value.to_str()?);
                     }
                 }
-                println!("handle response");
                 handle_response(cli.file_path_option, res).await?;
                 return Ok(());
             }
