@@ -169,7 +169,7 @@ struct Cli {
     certificate_path_option: Option<String>,
 
     /// The downloading file path .
-    #[arg(global = true, short = 'O', long, default_missing_value = "none")]
+    #[arg(global = true, short = 'o', long, default_missing_value = "none")]
     file_path_option: Option<String>,
 
     /// Skip certificate validation.
