@@ -328,29 +328,19 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         };
         fut
     };
-    let timeout_future = timeout(Duration::from_secs(5), request_future).await;
-
-    match timeout_future {
-        Ok(res_option) => match res_option {
-            Ok(res) => {
-                if cli.debug {
-                    let status = res.status();
-                    println!("< {:?} {}", res.version(), status);
-                    for (key, value) in res.headers().iter() {
-                        println!("< {}: {}", key, value.to_str()?);
-                    }
-                }
-                handle_response(cli.file_path_option, res).await?;
-                return Ok(());
+    let timeout_future = timeout(Duration::from_secs(5), request_future)
+        .await
+        .map_err(|e| anyhow!("Request timeout in 5 seconds, {}", e));
+    if let Ok(Ok(res)) = timeout_future {
+        if cli.debug {
+            let status = res.status();
+            println!("< {:?} {}", res.version(), status);
+            for (key, value) in res.headers().iter() {
+                println!("< {}: {}", key, value.to_str()?);
             }
-            Err(e) => {
-                error!("{}", e);
-                Ok(())
-            }
-        },
-        Err(e) => {
-            error!("Request timeout in 5 seconds, {}", e);
-            Ok(())
         }
+        handle_response(cli.file_path_option, res).await?;
+        return Ok(());
     }
+    Ok(())
 }
