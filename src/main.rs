@@ -190,7 +190,6 @@ async fn main() {
         .init();
     if let Err(e) = do_request(cli).await {
         println!("{}", e);
-        error!("{}", e);
     }
 }
 async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
@@ -349,8 +348,8 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
                 Ok(())
             }
         },
-        _ => {
-            error!("Request timeout in 5 seconds ");
+        Err(e) => {
+            error!("Request timeout in 5 seconds, {}", e);
             Ok(())
         }
     }
