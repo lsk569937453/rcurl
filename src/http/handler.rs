@@ -1,24 +1,16 @@
-use bytes::buf;
-use bytes::Bytes;
 use futures::StreamExt;
-use futures_util::TryStreamExt;
 use http_body_util::BodyExt;
 use http_body_util::BodyStream;
 use hyper::body::Incoming;
 use hyper::http::header::CONTENT_LENGTH;
 use hyper::Response;
 
-use http_body_util::StreamBody;
-use hyper::body::Frame;
-use hyper::{body::Buf, Request};
-use indicatif::{ProgressBar, ProgressState, ProgressStyle};
-use std::convert::Infallible;
+use hyper::body::Buf;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::cmp::min;
 use std::fs::OpenOptions;
 use std::io::Write as WriteStd;
-use std::{cmp::min, fmt::Write};
-use tokio::io::AsyncReadExt;
-use tokio::io::BufReader;
-use tokio::io::{self, AsyncWriteExt};
+
 pub async fn handle_response(
     file_path_option: Option<String>,
     res: Response<Incoming>,

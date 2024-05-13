@@ -3,7 +3,6 @@ use std::str::FromStr;
 extern crate anyhow;
 #[macro_use]
 extern crate tracing;
-use clap::builder::Str;
 use clap::Parser;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
@@ -12,22 +11,20 @@ use rustls::RootCertStore;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
-use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Level};
 mod http;
 use crate::http::handler::handle_response;
 use bytes::Bytes;
-use http_body_util::{BodyExt, Empty, Full};
+use http_body_util::Full;
 use rustls::client::danger::HandshakeSignatureValid;
 use rustls::client::danger::ServerCertVerifier;
 use rustls::client::WebPkiServerVerifier as WebPkiVerifier;
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature};
 use rustls::pki_types::ServerName;
-use rustls::pki_types::{CertificateDer, TrustAnchor, UnixTime};
+use rustls::pki_types::{CertificateDer, UnixTime};
 use rustls::{CertificateError, ClientConfig, DigitallySignedStruct};
 use std::convert::From;
-use std::env;
-use std::io::Write;
+
 use std::sync::Arc;
 use tokio_rustls::TlsConnector;
 
@@ -169,7 +166,7 @@ struct Cli {
     certificate_path_option: Option<String>,
 
     /// The downloading file path .
-    #[arg(global = true, short = 'O', long, default_missing_value = "none")]
+    #[arg(global = true, short = 'o', long, default_missing_value = "none")]
     file_path_option: Option<String>,
 
     /// Skip certificate validation.
@@ -192,6 +189,7 @@ async fn main() {
         // Set the subscriber as the default.
         .init();
     if let Err(e) = do_request(cli).await {
+        println!("{}", e);
         error!("{}", e);
     }
 }
@@ -343,7 +341,6 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
                         println!("< {}: {}", key, value.to_str()?);
                     }
                 }
-                println!("handle response");
                 handle_response(cli.file_path_option, res).await?;
                 return Ok(());
             }
