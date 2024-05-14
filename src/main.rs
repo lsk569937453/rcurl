@@ -213,6 +213,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         let verifier = WebPkiVerifier::builder(Arc::new(root_cert_store))
             .build()
             .map_err(|e| anyhow!("{}", e))?;
+
         ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
@@ -328,19 +329,17 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         };
         fut
     };
-    let timeout_future = timeout(Duration::from_secs(5), request_future)
+    let res = timeout(Duration::from_secs(5), request_future)
         .await
-        .map_err(|e| anyhow!("Request timeout in 5 seconds, {}", e));
-    if let Ok(Ok(res)) = timeout_future {
-        if cli.debug {
-            let status = res.status();
-            println!("< {:?} {}", res.version(), status);
-            for (key, value) in res.headers().iter() {
-                println!("< {}: {}", key, value.to_str()?);
-            }
+        .map_err(|e| anyhow!("Request timeout in 5 seconds, {}", e))??;
+    if cli.debug {
+        let status = res.status();
+        println!("< {:?} {}", res.version(), status);
+        for (key, value) in res.headers().iter() {
+            println!("< {}: {}", key, value.to_str()?);
         }
-        handle_response(cli.file_path_option, res).await?;
-        return Ok(());
     }
+    handle_response(cli.file_path_option, res).await?;
+
     Ok(())
 }
