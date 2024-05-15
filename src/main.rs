@@ -165,6 +165,10 @@ struct Cli {
     #[arg(short = 'c', long)]
     certificate_path_option: Option<String>,
 
+    /// The User Agent.
+    #[arg(short = 'A', long)]
+    user_agent_option: Option<String>,
+
     /// The downloading file path .
     #[arg(global = true, short = 'o', long, default_missing_value = "none")]
     file_path_option: Option<String>,
@@ -248,9 +252,12 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         "host",
         HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
     );
+    let user_agent = cli
+        .user_agent_option
+        .unwrap_or(format!("rcur/{}", env!("CARGO_PKG_VERSION").to_string()));
     request
         .headers_mut()
-        .append("User-Agent", HeaderValue::from_str("rcurl/0.0.6")?);
+        .append("User-Agent", HeaderValue::from_str(&user_agent)?);
     for x in cli.headers {
         let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();
         if split.len() == 2 {
