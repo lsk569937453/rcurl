@@ -165,6 +165,10 @@ struct Cli {
     #[arg(short = 'c', long)]
     certificate_path_option: Option<String>,
 
+    /// The User Agent.
+    #[arg(short = 'A', long)]
+    user_agent_option: Option<String>,
+
     /// The downloading file path .
     #[arg(global = true, short = 'o', long, default_missing_value = "none")]
     file_path_option: Option<String>,
@@ -190,7 +194,6 @@ async fn main() {
         .init();
     if let Err(e) = do_request(cli).await {
         println!("{}", e);
-        error!("{}", e);
     }
 }
 async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
@@ -214,6 +217,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         let verifier = WebPkiVerifier::builder(Arc::new(root_cert_store))
             .build()
             .map_err(|e| anyhow!("{}", e))?;
+
         ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
@@ -248,9 +252,12 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         "host",
         HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
     );
+    let user_agent = cli
+        .user_agent_option
+        .unwrap_or(format!("rcur/{}", env!("CARGO_PKG_VERSION").to_string()));
     request
         .headers_mut()
-        .append("User-Agent", HeaderValue::from_str("rcurl/0.0.6")?);
+        .append("User-Agent", HeaderValue::from_str(&user_agent)?);
     for x in cli.headers {
         let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();
         if split.len() == 2 {
@@ -329,29 +336,17 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         };
         fut
     };
-    let timeout_future = timeout(Duration::from_secs(5), request_future).await;
-
-    match timeout_future {
-        Ok(res_option) => match res_option {
-            Ok(res) => {
-                if cli.debug {
-                    let status = res.status();
-                    println!("< {:?} {}", res.version(), status);
-                    for (key, value) in res.headers().iter() {
-                        println!("< {}: {}", key, value.to_str()?);
-                    }
-                }
-                handle_response(cli.file_path_option, res).await?;
-                return Ok(());
-            }
-            Err(e) => {
-                error!("{}", e);
-                Ok(())
-            }
-        },
-        _ => {
-            error!("Request timeout in 5 seconds ");
-            Ok(())
+    let res = timeout(Duration::from_secs(5), request_future)
+        .await
+        .map_err(|e| anyhow!("Request timeout in 5 seconds, {}", e))??;
+    if cli.debug {
+        let status = res.status();
+        println!("< {:?} {}", res.version(), status);
+        for (key, value) in res.headers().iter() {
+            println!("< {}: {}", key, value.to_str()?);
         }
     }
+    handle_response(cli.file_path_option, res).await?;
+
+    Ok(())
 }
