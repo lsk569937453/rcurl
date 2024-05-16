@@ -19,12 +19,18 @@ hyper-util = { version = "0.1", features = ["full"] }
 indicatif = "0.17.7"
 openssl = { version = "0.10", features = ["vendored"] }
 pki-types = { package = "rustls-pki-types", version = "1" }
-rustls = { version = "0.22.1", features = ["logging"] }
+rustls = { version = "0.23.5", default-features = false, features = [
+    "logging",
+    "ring",
+] }
 rustls-pemfile = "2"
 serde = { version = "1.0.190", features = ["derive"] }
 serde_json = "1.0.108"
 tokio = { version = "1.32.0", features = ["full"] }
-tokio-rustls = "0.25.0"
+tokio-rustls = { version = "0.26.0", default-features = false, features = [
+    "logging",
+    "ring",
+] }
 tokio-util = { version = "0.7.7", features = ["full", "time"] }
 tracing = "0.1.4"
 tracing-appender = "0.2.3"

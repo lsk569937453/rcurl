@@ -29,9 +29,9 @@ use std::sync::Arc;
 use tokio_rustls::TlsConnector;
 
 #[derive(Debug)]
-struct DummyTlsVerifier;
+pub struct NoCertificateVerification {}
 
-impl ServerCertVerifier for DummyTlsVerifier {
+impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
     fn verify_server_cert(
         &self,
         _end_entity: &CertificateDer<'_>,
@@ -200,6 +200,10 @@ async fn main() {
     }
 }
 async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .map_err(|e| anyhow!("{:?}", e))?;
+
     let mut tls_config = if let Some(file_path) = cli.certificate_path_option.clone() {
         let f = std::fs::File::open(file_path.clone())?;
         let mut rd = std::io::BufReader::new(f);
@@ -230,7 +234,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     if cli.skip_certificate_validate {
         tls_config = rustls::ClientConfig::builder()
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(DummyTlsVerifier {}))
+            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification {}))
             .with_no_client_auth();
     };
     let uri: hyper::Uri = cli.url.parse()?;
