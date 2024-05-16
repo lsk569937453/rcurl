@@ -205,40 +205,28 @@ async fn main() {
     }
 }
 async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
-    // rustls::crypto::ring::default_provider()
-    //     .install_default()
-    //     .map_err(|e| anyhow!("{:?}", e))?;
+    let mut root_store = RootCertStore::empty();
 
-    let mut tls_config = if let Some(file_path) = cli.certificate_path_option.clone() {
+    if let Some(file_path) = cli.certificate_path_option.clone() {
         let f = std::fs::File::open(file_path.clone())?;
         let mut rd = std::io::BufReader::new(f);
-        let mut root_cert_store = RootCertStore::empty();
         for cert in rustls_pemfile::certs(&mut rd) {
-            root_cert_store.add(cert?)?;
+            root_store.add(cert?)?;
         }
-        let verifier = WebPkiVerifier::builder(Arc::new(root_cert_store))
-            .build()
-            .map_err(|e| anyhow!("{}", e))?;
-        ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
-            .with_no_client_auth()
     } else {
-        let mut root_cert_store = RootCertStore::empty();
-        root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-        let versions = rustls::DEFAULT_VERSIONS.to_vec();
-        ClientConfig::builder_with_provider(
-            CryptoProvider {
-                cipher_suites: DEFAULT_CIPHER_SUITES.to_vec(),
-                ..default_provider()
-            }
-            .into(),
-        )
-        .with_protocol_versions(&versions)?
-        .with_root_certificates(root_cert_store)
-        .with_no_client_auth()
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     };
+    let versions = rustls::DEFAULT_VERSIONS.to_vec();
+    let mut tls_config = ClientConfig::builder_with_provider(
+        CryptoProvider {
+            cipher_suites: DEFAULT_CIPHER_SUITES.to_vec(),
+            ..default_provider()
+        }
+        .into(),
+    )
+    .with_protocol_versions(&versions)?
+    .with_root_certificates(root_store)
+    .with_no_client_auth();
     tls_config.key_log = Arc::new(rustls::KeyLogFile::new());
 
     if cli.skip_certificate_validate {
