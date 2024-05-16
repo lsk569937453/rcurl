@@ -168,6 +168,9 @@ struct Cli {
     /// The User Agent.
     #[arg(short = 'A', long)]
     user_agent_option: Option<String>,
+    /// The Cookie option.
+    #[arg(short = 'b', long)]
+    cookie_option: Option<String>,
 
     /// The downloading file path .
     #[arg(global = true, short = 'o', long, default_missing_value = "none")]
@@ -258,6 +261,11 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     request
         .headers_mut()
         .append("User-Agent", HeaderValue::from_str(&user_agent)?);
+    if let Some(cookie) = cli.cookie_option {
+        request
+            .headers_mut()
+            .append("Cookie", HeaderValue::from_str(&cookie)?);
+    }
     for x in cli.headers {
         let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();
         if split.len() == 2 {
