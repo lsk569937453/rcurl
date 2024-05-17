@@ -16,6 +16,7 @@ mod http;
 use crate::http::handler::handle_response;
 use bytes::Bytes;
 use http_body_util::Full;
+use hyper::header::CONTENT_TYPE;
 use hyper::header::COOKIE;
 use hyper::header::HOST;
 use hyper::header::RANGE;
@@ -182,15 +183,28 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     } else {
         80
     };
+    let mut method = String::from("GET");
+    let mut content_type_option = None;
     let body = cli
         .body_option
+        .clone()
         .map_or(Full::new(Bytes::new()), |v| Full::new(Bytes::from(v)));
-
-    let method = cli.method_option.map_or(String::from("GET"), |x| x);
+    if cli.body_option.is_some() {
+        method = String::from("POST");
+        content_type_option = Some(String::from("application/x-www-form-urlencoded"));
+    }
+    if let Some(method_userdefined) = cli.method_option.clone() {
+        method = method_userdefined;
+    }
     let mut request = Request::builder()
         .method(method.as_str())
         .uri(cli.url)
         .body(body)?;
+    if let Some(content_type) = content_type_option {
+        request
+            .headers_mut()
+            .append(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
+    }
     request.headers_mut().append(
         HOST,
         HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
