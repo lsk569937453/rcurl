@@ -7,7 +7,8 @@ use clap::Parser;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
 use hyper_util::rt::TokioIo;
-use rustls::RootCertStore;
+use rustls::internal::msgs::handshake::Random;
+use rustls::{ContentType, RootCertStore};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -16,6 +17,11 @@ mod http;
 use crate::http::handler::handle_response;
 use bytes::Bytes;
 use http_body_util::Full;
+use hyper::header::COOKIE;
+use hyper::header::HOST;
+use hyper::header::RANGE;
+use hyper::header::USER_AGENT;
+
 use rustls::client::danger::HandshakeSignatureValid;
 use rustls::client::danger::ServerCertVerifier;
 use rustls::client::WebPkiServerVerifier as WebPkiVerifier;
@@ -184,6 +190,10 @@ struct Cli {
     /// Skip certificate validation.
     #[arg(short = 'k', long)]
     skip_certificate_validate: bool,
+
+    /// Http Range .
+    #[arg(short = 'r', long)]
+    range_option: Option<String>,
     /// The debug switch.
     #[arg(short = 'v', long)]
     debug: bool,
@@ -253,7 +263,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         .uri(cli.url)
         .body(body)?;
     request.headers_mut().append(
-        "host",
+        HOST,
         HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
     );
     let user_agent = cli
@@ -261,11 +271,17 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         .unwrap_or(format!("rcur/{}", env!("CARGO_PKG_VERSION").to_string()));
     request
         .headers_mut()
-        .append("User-Agent", HeaderValue::from_str(&user_agent)?);
+        .append(USER_AGENT, HeaderValue::from_str(&user_agent)?);
     if let Some(cookie) = cli.cookie_option {
         request
             .headers_mut()
-            .append("Cookie", HeaderValue::from_str(&cookie)?);
+            .append(COOKIE, HeaderValue::from_str(&cookie)?);
+    }
+    if let Some(range) = cli.range_option {
+        let ranges_format = format!("bytes={}", range);
+        request
+            .headers_mut()
+            .append(RANGE, HeaderValue::from_str(&ranges_format)?);
     }
     for x in cli.headers {
         let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();

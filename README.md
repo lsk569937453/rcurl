@@ -19,7 +19,47 @@ Options:
   -b, --cookie-option <COOKIE_OPTION>                      The Cookie option
   -o, --file-path-option <FILE_PATH_OPTION>                The downloading file path
   -k, --skip-certificate-validate                          Skip certificate validation
+  -r, --range-option <RANGE_OPTION>                        Range validation
   -v, --debug                                              The debug switch
   -h, --help                                               Print help
   -V, --version                                            Print version
+```
+# HTTP/HTTPS
+## GET
+```
+rcurl http://httpbin.org/get
+rcurl https://httpbin.org/get
+```
+## POST with body
+```
+ rcurl -X POST -d '{"a":1,"b":2}'  http://httpbin.org/post
+```
+## PUT
+```
+ rcurl -X PUT http://httpbin.org/put
+```
+## DEBUG
+```
+rcurl http://httpbin.org/get -v
+```
+## Skip Certificate validate  
+```
+rcurl http://httpbin.org/get -k
+```
+## Download file
+```
+rcurl -o test.html http://httpbin.org/get
+```
+## Headers
+```
+rcurl -H 'a:b' -H 'c:d' http://httpbin.org/get
+```
+
+## User Agent
+```
+rcurl -A 'a:b' http://httpbin.org/get
+```
+## Cookie
+```
+rcurl -b 'a:b' http://httpbin.org/get
 ```
