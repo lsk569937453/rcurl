@@ -191,7 +191,7 @@ struct Cli {
     #[arg(short = 'k', long)]
     skip_certificate_validate: bool,
 
-    /// Range validation.
+    /// Http Range .
     #[arg(short = 'r', long)]
     range_option: Option<String>,
     /// The debug switch.
