@@ -23,3 +23,42 @@ Options:
   -h, --help                                               Print help
   -V, --version                                            Print version
 ```
+# HTTP/HTTPS
+## GET
+```
+rcurl http://httpbin.org/get
+rcurl https://httpbin.org/get
+```
+## POST with body
+```
+ rcurl -X POST -d '{"a":1,"b":2}'  http://httpbin.org/post
+```
+## PUT
+```
+ rcurl -X PUT http://httpbin.org/put
+```
+## DEBUG
+```
+rcurl http://httpbin.org/get -v
+```
+## Skip Certificate validate  
+```
+rcurl http://httpbin.org/get -k
+```
+## Download file
+```
+rcurl -o test.html http://httpbin.org/get
+```
+## Headers
+```
+rcurl -H 'a:b' -H 'c:d' http://httpbin.org/get
+```
+
+## User Agent
+```
+rcurl -A 'a:b' http://httpbin.org/get
+```
+## Cookie
+```
+rcurl -b 'a:b' http://httpbin.org/get
+```

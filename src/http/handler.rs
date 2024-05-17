@@ -47,7 +47,11 @@ pub async fn handle_response(
         pb.finish_with_message("downloaded");
     } else {
         if content_length > 1024 * 1024 * 100 {
-            return Err(anyhow!("The content_length is large than 100MB!"));
+            return Err(anyhow!(
+                "Binary output can mess up your terminal. Use '--output -' to tell
+rcurl to output it to your terminal anyway, or consider '--output
+<FILE>' to save to a file."
+            ));
         }
         let mut body = res.collect().await?.aggregate();
         let dst = body.copy_to_bytes(content_length as usize);
