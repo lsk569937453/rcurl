@@ -19,6 +19,7 @@ Options:
   -b, --cookie-option <COOKIE_OPTION>                      The Cookie option
   -o, --file-path-option <FILE_PATH_OPTION>                The downloading file path
   -k, --skip-certificate-validate                          Skip certificate validation
+  -r, --range-option <RANGE_OPTION>                        Range validation
   -v, --debug                                              The debug switch
   -h, --help                                               Print help
   -V, --version                                            Print version
