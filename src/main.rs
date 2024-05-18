@@ -4,6 +4,7 @@ extern crate anyhow;
 #[macro_use]
 extern crate tracing;
 use clap::Parser;
+use futures::TryStreamExt;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
 use hyper_util::rt::TokioIo;
@@ -20,10 +21,14 @@ use hyper::header::CONTENT_TYPE;
 use hyper::header::COOKIE;
 use hyper::header::HOST;
 use hyper::header::RANGE;
+
 use hyper::header::USER_AGENT;
 
 use rustls::client::danger::HandshakeSignatureValid;
 
+use bytes::BytesMut;
+use common_multipart_rfc7578::client::multipart::Body;
+use hyper_multipart_rfc7578::client::multipart;
 use rustls::crypto::ring::default_provider;
 use rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
 use rustls::crypto::CryptoProvider;
@@ -34,6 +39,7 @@ use rustls::{ClientConfig, DigitallySignedStruct};
 use std::convert::From;
 use std::sync::Arc;
 use tokio_rustls::TlsConnector;
+
 #[derive(Debug)]
 pub struct NoCertificateVerification(CryptoProvider);
 
@@ -99,6 +105,9 @@ struct Cli {
     /// The body of the http request.
     #[arg(short = 'd', long)]
     body_option: Option<String>,
+    /// The form data of the http request.
+    #[arg(short = 'F', long)]
+    form_option: Vec<String>,
     /// The http headers.
     #[arg(short = 'H', long)]
     headers: Vec<String>,
@@ -185,10 +194,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     };
     let mut method = String::from("GET");
     let mut content_type_option = None;
-    let body = cli
-        .body_option
-        .clone()
-        .map_or(Full::new(Bytes::new()), |v| Full::new(Bytes::from(v)));
+
     if cli.body_option.is_some() {
         method = String::from("POST");
         content_type_option = Some(String::from("application/x-www-form-urlencoded"));
@@ -196,42 +202,56 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     if let Some(method_userdefined) = cli.method_option.clone() {
         method = method_userdefined;
     }
-    let mut request = Request::builder()
-        .method(method.as_str())
-        .uri(cli.url)
-        .body(body)?;
+    let mut request_builder = Request::builder().method(method.as_str()).uri(cli.url);
+    // .body(body)?;
     if let Some(content_type) = content_type_option {
-        request
-            .headers_mut()
-            .append(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
+        request_builder =
+            request_builder.header(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
     }
-    request.headers_mut().append(
+    request_builder = request_builder.header(
         HOST,
         HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
     );
     let user_agent = cli
         .user_agent_option
         .unwrap_or(format!("rcur/{}", env!("CARGO_PKG_VERSION").to_string()));
-    request
-        .headers_mut()
-        .append(USER_AGENT, HeaderValue::from_str(&user_agent)?);
+    request_builder = request_builder.header(USER_AGENT, HeaderValue::from_str(&user_agent)?);
     if let Some(cookie) = cli.cookie_option {
-        request
-            .headers_mut()
-            .append(COOKIE, HeaderValue::from_str(&cookie)?);
+        request_builder = request_builder.header(COOKIE, HeaderValue::from_str(&cookie)?);
     }
     if let Some(range) = cli.range_option {
         let ranges_format = format!("bytes={}", range);
-        request
-            .headers_mut()
-            .append(RANGE, HeaderValue::from_str(&ranges_format)?);
+        request_builder = request_builder.header(RANGE, HeaderValue::from_str(&ranges_format)?);
     }
+    let mut body_bytes = Bytes::new();
+    if cli.form_option.len() != 0 {
+        let mut form = multipart::Form::default();
+        request_builder = request_builder.header(
+            CONTENT_TYPE,
+            HeaderValue::from_str("multipart/form-data; boundary=boundary")?,
+        );
+
+        for form_data in cli.form_option {
+            let split: Vec<&str> = form_data.splitn(2, '=').collect();
+            ensure!(split.len() == 2, "form data error");
+            if split[1].starts_with("@") {
+                let file_path = split[1].replace("@", "");
+                form.add_file(split[0], file_path)?;
+            } else {
+                form.add_text(split[0], split[1]);
+            }
+        }
+        body_bytes = Body::from(form).try_concat().await?.into();
+    } else if let Some(body) = cli.body_option {
+        body_bytes = Bytes::from(body);
+    }
+
     for x in cli.headers {
         let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();
         if split.len() == 2 {
             let key = &split[0];
             let value = &split[1];
-            request.headers_mut().append(
+            request_builder = request_builder.header(
                 HeaderName::from_str(key.as_str())?,
                 HeaderValue::from_str(value.as_str())?,
             );
@@ -239,11 +259,15 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
             return Err(anyhow!("header error"));
         }
     }
+    let body = Full::new(body_bytes);
+    let request = request_builder.body(body)?;
+
     if cli.debug {
         for (key, value) in request.headers().iter() {
             println!("> {}: {}", key, value.to_str()?);
         }
     }
+
     let port = uri.port_u16().unwrap_or(default_port);
     let addr = format!("{}:{}", host, port);
     let stream = TcpStream::connect(addr.clone()).await?;
