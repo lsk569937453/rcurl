@@ -4,11 +4,12 @@ extern crate anyhow;
 #[macro_use]
 extern crate tracing;
 use clap::Parser;
+use futures::TryStreamExt;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
 use hyper_util::rt::TokioIo;
-use rustls::internal::msgs::handshake::Random;
-use rustls::{ContentType, RootCertStore};
+use mime_guess::mime;
+use rustls::RootCertStore;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -17,24 +18,30 @@ mod http;
 use crate::http::handler::handle_response;
 use bytes::Bytes;
 use http_body_util::Full;
+use hyper::header::CONTENT_TYPE;
 use hyper::header::COOKIE;
 use hyper::header::HOST;
 use hyper::header::RANGE;
+use std::path::Path;
+
 use hyper::header::USER_AGENT;
 
 use rustls::client::danger::HandshakeSignatureValid;
-use rustls::client::danger::ServerCertVerifier;
-use rustls::client::WebPkiServerVerifier as WebPkiVerifier;
+
+use bytes::BytesMut;
+
+use form_data_builder::FormData;
 use rustls::crypto::ring::default_provider;
 use rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
 use rustls::crypto::CryptoProvider;
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature};
 use rustls::pki_types::ServerName;
 use rustls::pki_types::{CertificateDer, UnixTime};
-use rustls::{CertificateError, ClientConfig, DigitallySignedStruct};
+use rustls::{ClientConfig, DigitallySignedStruct};
 use std::convert::From;
 use std::sync::Arc;
 use tokio_rustls::TlsConnector;
+
 #[derive(Debug)]
 pub struct NoCertificateVerification(CryptoProvider);
 
@@ -89,75 +96,6 @@ impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
     }
 }
 
-#[derive(Debug)]
-pub struct NoHostnameTlsVerifier {
-    verifier: Arc<WebPkiVerifier>,
-}
-
-impl ServerCertVerifier for NoHostnameTlsVerifier {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp: &[u8],
-        _now: UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        match self.verifier.verify_server_cert(
-            _end_entity,
-            _intermediates,
-            _server_name,
-            _ocsp,
-            _now,
-        ) {
-            Ok(res) => Ok(res),
-            Err(e) => match e {
-                rustls::Error::InvalidCertificate(reason) => {
-                    if reason == CertificateError::NotValidForName {
-                        Ok(rustls::client::danger::ServerCertVerified::assertion())
-                    } else {
-                        Err(rustls::Error::InvalidCertificate(reason))
-                    }
-                }
-                _ => Err(e),
-            },
-        }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        rustls::crypto::ring::default_provider()
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-}
 #[derive(Parser)]
 #[command(author, version, about, long_about)]
 struct Cli {
@@ -169,6 +107,9 @@ struct Cli {
     /// The body of the http request.
     #[arg(short = 'd', long)]
     body_option: Option<String>,
+    /// The form data of the http request.
+    #[arg(short = 'F', long)]
+    form_option: Vec<String>,
     /// The http headers.
     #[arg(short = 'H', long)]
     headers: Vec<String>,
@@ -253,42 +194,79 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     } else {
         80
     };
-    let body = cli
-        .body_option
-        .map_or(Full::new(Bytes::new()), |v| Full::new(Bytes::from(v)));
+    let mut method = String::from("GET");
+    let mut content_type_option = None;
 
-    let method = cli.method_option.map_or(String::from("GET"), |x| x);
-    let mut request = Request::builder()
-        .method(method.as_str())
-        .uri(cli.url)
-        .body(body)?;
-    request.headers_mut().append(
+    if cli.body_option.is_some() {
+        method = String::from("POST");
+        content_type_option = Some(String::from("application/x-www-form-urlencoded"));
+    }
+    if let Some(method_userdefined) = cli.method_option.clone() {
+        method = method_userdefined;
+    }
+    let mut request_builder = Request::builder().method(method.as_str()).uri(cli.url);
+    // .body(body)?;
+    if let Some(content_type) = content_type_option {
+        request_builder =
+            request_builder.header(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
+    }
+    request_builder = request_builder.header(
         HOST,
         HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
     );
     let user_agent = cli
         .user_agent_option
         .unwrap_or(format!("rcur/{}", env!("CARGO_PKG_VERSION").to_string()));
-    request
-        .headers_mut()
-        .append(USER_AGENT, HeaderValue::from_str(&user_agent)?);
+    request_builder = request_builder.header(USER_AGENT, HeaderValue::from_str(&user_agent)?);
     if let Some(cookie) = cli.cookie_option {
-        request
-            .headers_mut()
-            .append(COOKIE, HeaderValue::from_str(&cookie)?);
+        request_builder = request_builder.header(COOKIE, HeaderValue::from_str(&cookie)?);
     }
     if let Some(range) = cli.range_option {
         let ranges_format = format!("bytes={}", range);
-        request
-            .headers_mut()
-            .append(RANGE, HeaderValue::from_str(&ranges_format)?);
+        request_builder = request_builder.header(RANGE, HeaderValue::from_str(&ranges_format)?);
     }
+    let mut body_bytes = Bytes::new();
+    if cli.form_option.len() != 0 {
+        let mut form = FormData::new(Vec::new()); // use a Vec<u8> as a writer
+        let form_header = form.content_type_header(); // add this `Content-Type` header to your HTTP request
+
+        request_builder =
+            request_builder.header(CONTENT_TYPE, HeaderValue::from_str(form_header.as_str())?);
+        request_builder = request_builder.method("POST");
+
+        for form_data in cli.form_option {
+            let split: Vec<&str> = form_data.splitn(2, '=').collect();
+            ensure!(split.len() == 2, "form data error");
+            if split[1].starts_with("@") {
+                let file_path = split[1].replace("@", "");
+                let cloned_path = file_path.clone();
+                let path = Path::new(&file_path)
+                    .file_name()
+                    .ok_or(anyhow!("Can not get the name of uploading file."))?;
+
+                let mime_guess = mime_guess::from_path(cloned_path)
+                    .first()
+                    .unwrap_or(mime::APPLICATION_OCTET_STREAM);
+
+                form.write_path(split[0], path, mime_guess.to_string().as_str())?;
+            } else {
+                form.write_field(split[0], split[1])?;
+            }
+        }
+        // let s = body.map(|try_c| try_c.map(|r| r.to_vec())).try_concat();
+        let bytes = form.finish()?;
+        // let out = rt.block_on(s).unwrap();
+        body_bytes = bytes.into();
+    } else if let Some(body) = cli.body_option {
+        body_bytes = Bytes::from(body);
+    }
+
     for x in cli.headers {
         let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();
         if split.len() == 2 {
             let key = &split[0];
             let value = &split[1];
-            request.headers_mut().append(
+            request_builder = request_builder.header(
                 HeaderName::from_str(key.as_str())?,
                 HeaderValue::from_str(value.as_str())?,
             );
@@ -296,11 +274,15 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
             return Err(anyhow!("header error"));
         }
     }
+    let body = Full::new(body_bytes);
+    let request = request_builder.body(body)?;
+
     if cli.debug {
         for (key, value) in request.headers().iter() {
             println!("> {}: {}", key, value.to_str()?);
         }
     }
+
     let port = uri.port_u16().unwrap_or(default_port);
     let addr = format!("{}:{}", host, port);
     let stream = TcpStream::connect(addr.clone()).await?;
