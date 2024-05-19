@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+form-data-builder = "1.0.1"
+mime_guess = "2.0.4"
 anyhow = "1.0"
 bytes = "1"
 chrono = "0.4.31"
@@ -37,5 +39,3 @@ tracing = "0.1.4"
 tracing-appender = "0.2.3"
 tracing-subscriber = "0.3.18"
 webpki-roots = "0.26.0"
-hyper-multipart-rfc7578 = "0.8"
-common-multipart-rfc7578 = "0.6.0"

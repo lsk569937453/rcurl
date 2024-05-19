@@ -8,6 +8,7 @@ use futures::TryStreamExt;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
 use hyper_util::rt::TokioIo;
+use mime_guess::mime;
 use rustls::RootCertStore;
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -21,14 +22,15 @@ use hyper::header::CONTENT_TYPE;
 use hyper::header::COOKIE;
 use hyper::header::HOST;
 use hyper::header::RANGE;
+use std::path::Path;
 
 use hyper::header::USER_AGENT;
 
 use rustls::client::danger::HandshakeSignatureValid;
 
 use bytes::BytesMut;
-use common_multipart_rfc7578::client::multipart::Body;
-use hyper_multipart_rfc7578::client::multipart;
+
+use form_data_builder::FormData;
 use rustls::crypto::ring::default_provider;
 use rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
 use rustls::crypto::CryptoProvider;
@@ -225,23 +227,36 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     }
     let mut body_bytes = Bytes::new();
     if cli.form_option.len() != 0 {
-        let mut form = multipart::Form::default();
-        request_builder = request_builder.header(
-            CONTENT_TYPE,
-            HeaderValue::from_str("multipart/form-data; boundary=boundary")?,
-        );
+        let mut form = FormData::new(Vec::new()); // use a Vec<u8> as a writer
+        let form_header = form.content_type_header(); // add this `Content-Type` header to your HTTP request
+
+        request_builder =
+            request_builder.header(CONTENT_TYPE, HeaderValue::from_str(form_header.as_str())?);
+        request_builder = request_builder.method("POST");
 
         for form_data in cli.form_option {
             let split: Vec<&str> = form_data.splitn(2, '=').collect();
             ensure!(split.len() == 2, "form data error");
             if split[1].starts_with("@") {
                 let file_path = split[1].replace("@", "");
-                form.add_file(split[0], file_path)?;
+                let cloned_path = file_path.clone();
+                let path = Path::new(&file_path)
+                    .file_name()
+                    .ok_or(anyhow!("Can not get the name of uploading file."))?;
+
+                let mime_guess = mime_guess::from_path(cloned_path)
+                    .first()
+                    .unwrap_or(mime::APPLICATION_OCTET_STREAM);
+
+                form.write_path(split[0], path, mime_guess.to_string().as_str())?;
             } else {
-                form.add_text(split[0], split[1]);
+                form.write_field(split[0], split[1])?;
             }
         }
-        body_bytes = Body::from(form).try_concat().await?.into();
+        // let s = body.map(|try_c| try_c.map(|r| r.to_vec())).try_concat();
+        let bytes = form.finish()?;
+        // let out = rt.block_on(s).unwrap();
+        body_bytes = bytes.into();
     } else if let Some(body) = cli.body_option {
         body_bytes = Bytes::from(body);
     }
