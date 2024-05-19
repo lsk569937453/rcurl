@@ -21,6 +21,7 @@ use http_body_util::Full;
 use hyper::header::CONTENT_TYPE;
 use hyper::header::COOKIE;
 use hyper::header::HOST;
+mod cli;
 use hyper::header::RANGE;
 use std::path::Path;
 
@@ -30,6 +31,7 @@ use rustls::client::danger::HandshakeSignatureValid;
 
 use bytes::BytesMut;
 
+use crate::cli::app_config::Cli;
 use form_data_builder::FormData;
 use rustls::crypto::ring::default_provider;
 use rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
@@ -41,7 +43,6 @@ use rustls::{ClientConfig, DigitallySignedStruct};
 use std::convert::From;
 use std::sync::Arc;
 use tokio_rustls::TlsConnector;
-
 #[derive(Debug)]
 pub struct NoCertificateVerification(CryptoProvider);
 
@@ -94,50 +95,6 @@ impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         self.0.signature_verification_algorithms.supported_schemes()
     }
-}
-
-#[derive(Parser)]
-#[command(author, version, about, long_about)]
-struct Cli {
-    /// The request url,like http://www.google.com
-    url: String,
-    /// The http method,like GET,POST,etc.
-    #[arg(short = 'X', long, value_name = "HTTP Method")]
-    method_option: Option<String>,
-    /// The body of the http request.
-    #[arg(short = 'd', long)]
-    body_option: Option<String>,
-    /// The form data of the http request.
-    #[arg(short = 'F', long)]
-    form_option: Vec<String>,
-    /// The http headers.
-    #[arg(short = 'H', long)]
-    headers: Vec<String>,
-    /// The pem path.
-    #[arg(short = 'c', long)]
-    certificate_path_option: Option<String>,
-
-    /// The User Agent.
-    #[arg(short = 'A', long)]
-    user_agent_option: Option<String>,
-    /// The Cookie option.
-    #[arg(short = 'b', long)]
-    cookie_option: Option<String>,
-
-    /// The downloading file path .
-    #[arg(global = true, short = 'o', long, default_missing_value = "none")]
-    file_path_option: Option<String>,
-
-    /// Skip certificate validation.
-    #[arg(short = 'k', long)]
-    skip_certificate_validate: bool,
-
-    /// Http Range .
-    #[arg(short = 'r', long)]
-    range_option: Option<String>,
-    /// The debug switch.
-    #[arg(short = 'v', long)]
-    debug: bool,
 }
 
 #[tokio::main]
@@ -204,7 +161,9 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     if let Some(method_userdefined) = cli.method_option.clone() {
         method = method_userdefined;
     }
-    let mut request_builder = Request::builder().method(method.as_str()).uri(cli.url);
+    let mut request_builder = Request::builder()
+        .method(method.as_str())
+        .uri(cli.url.clone());
     if let Some(content_type) = content_type_option {
         request_builder =
             request_builder.header(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
@@ -215,12 +174,13 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     );
     let user_agent = cli
         .user_agent_option
+        .clone()
         .unwrap_or(format!("rcur/{}", env!("CARGO_PKG_VERSION").to_string()));
     request_builder = request_builder.header(USER_AGENT, HeaderValue::from_str(&user_agent)?);
-    if let Some(cookie) = cli.cookie_option {
+    if let Some(cookie) = cli.cookie_option.clone() {
         request_builder = request_builder.header(COOKIE, HeaderValue::from_str(&cookie)?);
     }
-    if let Some(range) = cli.range_option {
+    if let Some(range) = cli.range_option.clone() {
         let ranges_format = format!("bytes={}", range);
         request_builder = request_builder.header(RANGE, HeaderValue::from_str(&ranges_format)?);
     }
@@ -233,7 +193,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
             request_builder.header(CONTENT_TYPE, HeaderValue::from_str(form_header.as_str())?);
         request_builder = request_builder.method("POST");
 
-        for form_data in cli.form_option {
+        for form_data in cli.form_option.clone() {
             let split: Vec<&str> = form_data.splitn(2, '=').collect();
             ensure!(split.len() == 2, "form data error");
             if split[1].starts_with("@") {
@@ -254,11 +214,14 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         }
         let bytes = form.finish()?;
         body_bytes = bytes.into();
-    } else if let Some(body) = cli.body_option {
+    } else if let Some(body) = cli.body_option.clone() {
         body_bytes = Bytes::from(body);
     }
 
-    for x in cli.headers {
+    if cli.header_option {
+        request_builder = request_builder.method("HEAD");
+    }
+    for x in cli.headers.clone() {
         let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();
         if split.len() == 2 {
             let key = &split[0];
@@ -358,7 +321,8 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
             println!("< {}: {}", key, value.to_str()?);
         }
     }
-    handle_response(cli.file_path_option, res).await?;
+
+    handle_response(&cli, res).await?;
 
     Ok(())
 }
