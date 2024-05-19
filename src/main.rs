@@ -205,7 +205,6 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
         method = method_userdefined;
     }
     let mut request_builder = Request::builder().method(method.as_str()).uri(cli.url);
-    // .body(body)?;
     if let Some(content_type) = content_type_option {
         request_builder =
             request_builder.header(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
@@ -253,9 +252,7 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
                 form.write_field(split[0], split[1])?;
             }
         }
-        // let s = body.map(|try_c| try_c.map(|r| r.to_vec())).try_concat();
         let bytes = form.finish()?;
-        // let out = rt.block_on(s).unwrap();
         body_bytes = bytes.into();
     } else if let Some(body) = cli.body_option {
         body_bytes = Bytes::from(body);
@@ -274,13 +271,21 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
             return Err(anyhow!("header error"));
         }
     }
+    let content_length = body_bytes.len();
     let body = Full::new(body_bytes);
     let request = request_builder.body(body)?;
 
     if cli.debug {
+        println!(
+            "> {} {} {:?}",
+            request.method(),
+            request.uri().path(),
+            request.version()
+        );
         for (key, value) in request.headers().iter() {
             println!("> {}: {}", key, value.to_str()?);
         }
+        println!("> Content-Length: {}", content_length);
     }
 
     let port = uri.port_u16().unwrap_or(default_port);
