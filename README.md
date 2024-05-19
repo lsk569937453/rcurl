@@ -11,16 +11,24 @@ Arguments:
   <URL>  The request url,like http://www.google.com
 
 Options:
-  -X, --method-option <HTTP Method>                        The http method,like GET,POST,etc
-  -d, --body-option <BODY_OPTION>                          The body of the http request
-  -H, --headers <HEADERS>                                  The http headers
+Usage: rcurl.exe [OPTIONS] <URL>
+
+Arguments:
+  <URL>  The request url,like http://www.google.com
+
+Options:
+  -X, --request <method>                                   Specify request method to use
+  -d, --data <data>                                        HTTP POST data
+  -F, --form <name=content>                                Specify multipart MIME data
+  -H, --header <header/@file>                              The http headers
   -c, --certificate-path-option <CERTIFICATE_PATH_OPTION>  The pem path
-  -A, --user-agent-option <USER_AGENT_OPTION>              The User Agent
-  -b, --cookie-option <COOKIE_OPTION>                      The Cookie option
-  -o, --file-path-option <FILE_PATH_OPTION>                The downloading file path
-  -k, --skip-certificate-validate                          Skip certificate validation
-  -r, --range-option <RANGE_OPTION>                        Range validation
-  -v, --debug                                              The debug switch
+  -A, --user-agent <name>                                  Send User-Agent <name> to server
+  -b, --cookie <data|filename>                             The Cookie option
+  -o, --output <file>                                      Write to file instead of stdout
+  -k, --insecure                                           Allow insecure server connections
+  -I, --head                                               Show document info only
+  -r, --range <range>                                      Retrieve only the bytes within RANGE
+  -v, --verbose                                            Make the operation more talkative
   -h, --help                                               Print help
   -V, --version                                            Print version
 ```
