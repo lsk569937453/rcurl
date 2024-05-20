@@ -29,7 +29,14 @@ pub struct Cli {
     /// The pem path.
     #[arg(short = 'c', long, group = "http")]
     pub certificate_path_option: Option<String>,
-
+    /// Server user and password
+    #[arg(
+        short = 'u',
+        long = "user",
+        group = "http",
+        value_name = "user:password"
+    )]
+    pub authority_option: Option<String>,
     ///  Send User-Agent <name> to server
     #[arg(short = 'A', long = "user-agent", value_name = "name", group = "http")]
     pub user_agent_option: Option<String>,
