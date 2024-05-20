@@ -11,12 +11,6 @@ Arguments:
   <URL>  The request url,like http://www.google.com
 
 Options:
-Usage: rcurl.exe [OPTIONS] <URL>
-
-Arguments:
-  <URL>  The request url,like http://www.google.com
-
-Options:
   -X, --request <method>                                   Specify request method to use
   -d, --data <data>                                        HTTP POST data
   -F, --form <name=content>                                Specify multipart MIME data
@@ -24,6 +18,7 @@ Options:
   -c, --certificate-path-option <CERTIFICATE_PATH_OPTION>  The pem path
   -A, --user-agent <name>                                  Send User-Agent <name> to server
   -b, --cookie <data|filename>                             The Cookie option
+  -e, --referer <URL>                                      Referrer URL
   -o, --output <file>                                      Write to file instead of stdout
   -k, --insecure                                           Allow insecure server connections
   -I, --head                                               Show document info only
