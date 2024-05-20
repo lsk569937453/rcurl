@@ -41,7 +41,9 @@ pub struct Cli {
         group = "http"
     )]
     pub cookie_option: Option<String>,
-
+    ///  Referrer URL
+    #[arg(short = 'e', long = "referer", value_name = "URL", group = "http")]
+    pub refer_option: Option<String>,
     ///  Write to file instead of stdout.
     #[arg(
         global = true,

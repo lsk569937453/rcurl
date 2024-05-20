@@ -21,6 +21,8 @@ use http_body_util::Full;
 use hyper::header::CONTENT_TYPE;
 use hyper::header::COOKIE;
 use hyper::header::HOST;
+use hyper::header::REFERER;
+
 mod cli;
 use hyper::header::RANGE;
 use std::path::Path;
@@ -183,6 +185,9 @@ async fn do_request(cli: Cli) -> Result<(), anyhow::Error> {
     if let Some(range) = cli.range_option.clone() {
         let ranges_format = format!("bytes={}", range);
         request_builder = request_builder.header(RANGE, HeaderValue::from_str(&ranges_format)?);
+    }
+    if let Some(refer) = cli.refer_option.clone() {
+        request_builder = request_builder.header(REFERER, HeaderValue::from_str(&refer)?);
     }
     let mut body_bytes = Bytes::new();
     if cli.form_option.len() != 0 {
