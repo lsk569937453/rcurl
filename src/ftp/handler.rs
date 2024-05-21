@@ -1,5 +1,6 @@
 use crate::cli::app_config::Cli;
 use crate::ftp;
+use async_std::fs::File;
 use async_std::path::Path;
 use env_logger::Builder;
 use futures::io::BufReader;
@@ -8,13 +9,13 @@ use indicatif::ProgressStyle;
 use log::LevelFilter;
 use std::pin::Pin;
 use std::task::Context;
-
-use async_std::fs::File;
 use std::task::Poll;
 use suppaftp::async_native_tls::TlsConnector;
 use suppaftp::types::FileType;
 use suppaftp::{AsyncNativeTlsConnector, AsyncNativeTlsFtpStream};
+use tokio::fs::OpenOptions;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::io::{self, AsyncBufReadExt};
 #[derive(Debug)]
 pub struct ProgressBarIter<T> {
@@ -58,7 +59,7 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
             .await?;
     };
 
-    if let Some(authority) = cli.authority_option {
+    if let Some(authority) = cli.authority_option.clone() {
         let split: Vec<&str> = authority.splitn(2, ':').collect();
         ensure!(split.len() == 2, "User data error");
         ftp_stream
@@ -89,14 +90,40 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
         };
         let _ = ftp_stream.put_file(String::from(file_name), &mut pro).await;
         pb.finish_with_message("upload success");
-    } else if let Some(quote) = cli.quote_option {
+    } else if let Some(quote) = cli.quote_option.clone() {
         let response = ftp_stream.site(quote).await?;
     } else {
         let file_list = ftp_stream
             .list(None)
             .await
             .map_err(|e| anyhow!("Command failed, error:{}", e))?;
-        file_list.iter().for_each(|f| println!("{f}"));
+        let str = format!("{:?}", file_list);
+        output(cli, str.as_bytes().to_vec()).await?;
+    }
+    Ok(())
+}
+async fn output(cli: Cli, mut item: Vec<u8>) -> Result<(), anyhow::Error> {
+    if let Some(range) = cli.range_option {
+        let parsed_range = http_range_header::parse_range_header(&range)?;
+        let vec_ranges = parsed_range.validate(item.len() as u64)?;
+        let mut concatenated_bytes = Vec::new();
+        for range in vec_ranges {
+            let start = *range.start() as usize;
+            let end = *range.end() as usize;
+            let bytes = item[start..end].to_vec();
+            concatenated_bytes.extend(bytes);
+        }
+        item = concatenated_bytes.clone();
+    }
+    if let Some(file_path) = cli.file_path_option {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(file_path)
+            .await?;
+        let _ = file.write_all(item.as_slice()).await;
+    } else {
+        println!("{}", String::from_utf8_lossy(item.as_slice()));
     }
     Ok(())
 }
