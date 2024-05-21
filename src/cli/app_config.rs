@@ -29,7 +29,14 @@ pub struct Cli {
     /// The pem path.
     #[arg(short = 'c', long, group = "http")]
     pub certificate_path_option: Option<String>,
-
+    /// Server user and password
+    #[arg(
+        short = 'u',
+        long = "user",
+        group = "http",
+        value_name = "user:password"
+    )]
+    pub authority_option: Option<String>,
     ///  Send User-Agent <name> to server
     #[arg(short = 'A', long = "user-agent", value_name = "name", group = "http")]
     pub user_agent_option: Option<String>,
@@ -55,8 +62,12 @@ pub struct Cli {
     )]
     pub file_path_option: Option<String>,
 
+    ///  Transfer local FILE to destination
+    #[arg(long = "upload-file", short = 'T', value_name = "file")]
+    pub uploadfile_option: Option<String>,
+
     /// Allow insecure server connections
-    #[arg(short = 'k', long = "insecure", group = "http")]
+    #[arg(short = 'k', long = "insecure")]
     pub skip_certificate_validate: bool,
     /// Show document info only
     #[arg(long = "head", short = 'I', group = "http")]
@@ -65,6 +76,6 @@ pub struct Cli {
     #[arg(short = 'r', long = "range", value_name = "range", group = "http")]
     pub range_option: Option<String>,
     ///  Make the operation more talkative
-    #[arg(short = 'v', long = "verbose", group = "http")]
+    #[arg(short = 'v', long = "verbose")]
     pub debug: bool,
 }
