@@ -1,7 +1,7 @@
 # Rcurl
-Rcurl is a implementation of the curl library  that provides a set of functions for making HTTP requests.
+Rcurl is a implementation of the curl library  that provides a set of functions for making HTTP/FTP requests.
 
-You can use it to make HTTP requests like curl to a server and get the response.
+You can use it to make HTTP/FTP requests like curl to a server and get the response.
 
 # Document
 ```
@@ -67,4 +67,14 @@ rcurl -A 'a:b' http://httpbin.org/get
 ## Cookie
 ```
 rcurl -b 'a:b' http://httpbin.org/get
+```
+
+# FTP/FTPS
+## List directory
+```
+ rcurl -u "demo:password" ftp://test.rebex.net:21/
+```
+## Upload file
+```
+rcurl -T LICENSE -u "demo:password" ftp://test.rebex.net:21/
 ```

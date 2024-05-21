@@ -66,6 +66,10 @@ pub struct Cli {
     #[arg(long = "upload-file", short = 'T', value_name = "file")]
     pub uploadfile_option: Option<String>,
 
+    ///  Send command(s) to server before transfer
+    #[arg(long = "quote", short = 'Q', value_name = "command")]
+    pub quote_option: Option<String>,
+
     /// Allow insecure server connections
     #[arg(short = 'k', long = "insecure")]
     pub skip_certificate_validate: bool,
