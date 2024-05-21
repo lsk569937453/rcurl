@@ -68,3 +68,13 @@ rcurl -A 'a:b' http://httpbin.org/get
 ```
 rcurl -b 'a:b' http://httpbin.org/get
 ```
+
+# FTP/FTPS
+## List directory
+```
+ rcurl -u "demo:password" ftp://test.rebex.net:21/
+```
+## Upload file
+```
+rcurl -T LICENSE -u "demo:password" ftp://test.rebex.net:21/
+```
