@@ -62,8 +62,12 @@ pub struct Cli {
     )]
     pub file_path_option: Option<String>,
 
+    ///  Transfer local FILE to destination
+    #[arg(long = "upload-file", short = 'T', value_name = "file")]
+    pub uploadfile_option: Option<String>,
+
     /// Allow insecure server connections
-    #[arg(short = 'k', long = "insecure", group = "http")]
+    #[arg(short = 'k', long = "insecure")]
     pub skip_certificate_validate: bool,
     /// Show document info only
     #[arg(long = "head", short = 'I', group = "http")]

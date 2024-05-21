@@ -16,10 +16,12 @@ Options:
   -F, --form <name=content>                                Specify multipart MIME data
   -H, --header <header/@file>                              The http headers
   -c, --certificate-path-option <CERTIFICATE_PATH_OPTION>  The pem path
+  -u, --user <user:password>                               Server user and password
   -A, --user-agent <name>                                  Send User-Agent <name> to server
   -b, --cookie <data|filename>                             The Cookie option
   -e, --referer <URL>                                      Referrer URL
   -o, --output <file>                                      Write to file instead of stdout
+  -T, --upload-file <file>                                 Transfer local FILE to destination
   -k, --insecure                                           Allow insecure server connections
   -I, --head                                               Show document info only
   -r, --range <range>                                      Retrieve only the bytes within RANGE
