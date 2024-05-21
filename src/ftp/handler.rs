@@ -67,6 +67,7 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
             .map_err(|e| anyhow!("login error:{}", e))?;
     }
     ftp_stream.cwd(uri.path()).await?;
+
     assert!(ftp_stream.transfer_type(FileType::Binary).await.is_ok());
     if let Some(upload_file) = cli.uploadfile_option {
         let path = Path::new(&upload_file);
@@ -88,6 +89,8 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
         };
         let _ = ftp_stream.put_file(String::from(file_name), &mut pro).await;
         pb.finish_with_message("upload success");
+    } else if let Some(quote) = cli.quote_option {
+        let response = ftp_stream.site(quote).await?;
     } else {
         let file_list = ftp_stream
             .list(None)
