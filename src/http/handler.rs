@@ -160,6 +160,15 @@ rcurl to output it to your terminal anyway, or consider '--output
     Ok(())
 }
 pub async fn http_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
+    let log_level_hyper = if cli.debug { Level::TRACE } else { Level::INFO };
+
+    tracing_subscriber::fmt()
+        // Configure formatting settings.
+        .with_level(true)
+        .with_max_level(log_level_hyper)
+        // Set the subscriber as the default.
+        .init();
+
     let mut root_store = RootCertStore::empty();
 
     if let Some(file_path) = cli.certificate_path_option.clone() {

@@ -72,6 +72,6 @@ pub struct Cli {
     #[arg(short = 'r', long = "range", value_name = "range", group = "http")]
     pub range_option: Option<String>,
     ///  Make the operation more talkative
-    #[arg(short = 'v', long = "verbose", group = "http")]
+    #[arg(short = 'v', long = "verbose")]
     pub debug: bool,
 }

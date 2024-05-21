@@ -15,14 +15,7 @@ use crate::cli::app_config::Cli;
 #[tokio::main]
 async fn main() {
     let cli: Cli = Cli::parse();
-    let log_level_hyper = if cli.debug { Level::TRACE } else { Level::INFO };
 
-    tracing_subscriber::fmt()
-        // Configure formatting settings.
-        .with_level(true)
-        .with_max_level(log_level_hyper)
-        // Set the subscriber as the default.
-        .init();
     if let Err(e) = do_request(cli).await {
         println!("{}", e);
     }
