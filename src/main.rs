@@ -9,13 +9,24 @@ use tracing::Level;
 mod http;
 use crate::ftp::handler::ftp_request;
 mod cli;
+use clap::CommandFactory;
 
 use crate::cli::app_config::Cli;
 
 #[tokio::main]
 async fn main() {
     let cli: Cli = Cli::parse();
-
+    if cli.help {
+        let mut cmd = Cli::command();
+        cmd.build();
+        cmd.print_help();
+        std::process::exit(0);
+    } else if cli.help_all {
+        let mut cmd = Cli::command();
+        cmd.build();
+        cmd.print_long_help();
+        std::process::exit(0);
+    }
     if let Err(e) = do_request(cli).await {
         println!("{}", e);
     }

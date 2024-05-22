@@ -1,6 +1,8 @@
 use clap::Parser;
 #[derive(Parser)]
-#[command(author, version, about, long_about)]
+#[command(author, version, about, long_about, arg_required_else_help = true)]
+#[clap(disable_help_flag = true)]
+
 pub struct Cli {
     /// The request url,like http://www.google.com
     pub url: String,
@@ -45,7 +47,8 @@ pub struct Cli {
         short = 'b',
         long = "cookie",
         value_name = "data|filename",
-        group = "http"
+        group = "http",
+        hide_short_help = true
     )]
     pub cookie_option: Option<String>,
     ///  Referrer URL
@@ -82,4 +85,10 @@ pub struct Cli {
     ///  Make the operation more talkative
     #[arg(short = 'v', long = "verbose")]
     pub debug: bool,
+    /// Print help
+    #[arg(short, long, action = clap::ArgAction::Help)]
+    pub help: bool,
+    /// Print help, including uncommon options
+    #[arg(long, action = clap::ArgAction::Help)]
+    pub help_all: bool,
 }
