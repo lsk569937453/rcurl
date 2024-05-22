@@ -124,6 +124,7 @@ pub async fn handle_response(
         return Ok(t);
     }
     let (parts, incoming) = res.into_parts();
+    let mut body_for_test = Full::new(Bytes::from("")).boxed();
 
     let content_length_option = parts.headers.get(CONTENT_LENGTH);
 
@@ -163,11 +164,11 @@ rcurl to output it to your terminal anyway, or consider '--output
             let mut body = incoming.collect().await?.aggregate();
             let dst = body.copy_to_bytes(content_length as usize);
             let response_string = String::from_utf8_lossy(&dst);
+            body_for_test = Full::new(Bytes::from(response_string.clone().to_string())).boxed();
             println!("{}", response_string);
         }
     }
-    let bodyss = Full::new(Bytes::from("")).boxed();
-    let res = Response::from_parts(parts, bodyss);
+    let res = Response::from_parts(parts, body_for_test);
     Ok(res)
 }
 pub async fn http_request(

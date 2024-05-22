@@ -5,6 +5,7 @@ extern crate tracing;
 use clap::Parser;
 mod ftp;
 use http::handler::http_request;
+use http_body_util::BodyExt;
 use hyper_util::client::legacy::Error;
 use tracing::Level;
 mod http;
@@ -13,7 +14,7 @@ mod cli;
 use clap::CommandFactory;
 mod response;
 use crate::cli::app_config::Cli;
-use crate::response::res::Response;
+use crate::response::res::RcurlResponse;
 
 #[tokio::main]
 async fn main() {
@@ -23,7 +24,7 @@ async fn main() {
         println!("{}", e);
     }
 }
-async fn do_request(cli: Cli) -> Result<Response, anyhow::Error> {
+async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
     let url = cli.url.clone();
     let uri: hyper::Uri = url.parse()?;
     if let Some(scheme) = uri.scheme() {
@@ -32,11 +33,11 @@ async fn do_request(cli: Cli) -> Result<Response, anyhow::Error> {
         let s = match scheme_str {
             "http" | "https" => {
                 let http_parts = http_request(cli, scheme_str).await?;
-                Response::Http(http_parts)
+                RcurlResponse::Http(http_parts)
             }
             "ftp" | "ftps" | "sftp" => {
                 let ftp_res = ftp_request(cli, scheme_str).await?;
-                Response::Ftp(ftp_res)
+                RcurlResponse::Ftp(ftp_res)
             }
             _ => Err(anyhow!("Can not find scheme in the uri:{}.", uri))?,
         };
@@ -57,9 +58,9 @@ mod tests {
         cli.url = "http://httpbin.org/get".to_string();
         let result = do_request(cli).await;
         assert!(result.is_ok());
-        let res = result.unwrap();
-        if let RcurlResponse::Http(parts) = res {
-            assert_eq!(parts.status, StatusCode::OK)
+        let rcurl_res = result.unwrap();
+        if let RcurlResponse::Http(response) = rcurl_res {
+            assert_eq!(response.status(), StatusCode::OK)
         } else {
             assert!(false);
         }
@@ -72,8 +73,8 @@ mod tests {
         let result = do_request(cli).await;
         assert!(result.is_ok());
         let res = result.unwrap();
-        if let Response::Http(parts) = res {
-            assert_eq!(parts.status, StatusCode::OK)
+        if let RcurlResponse::Http(parts) = res {
+            assert_eq!(parts.status(), StatusCode::OK)
         } else {
             assert!(false);
         }
@@ -87,8 +88,8 @@ mod tests {
         let result = do_request(cli).await;
         assert!(result.is_ok());
         let res = result.unwrap();
-        if let Response::Http(parts) = res {
-            assert_eq!(parts.status, StatusCode::OK)
+        if let RcurlResponse::Http(parts) = res {
+            assert_eq!(parts.status(), StatusCode::OK)
         } else {
             assert!(false);
         }
@@ -101,8 +102,8 @@ mod tests {
         let result = do_request(cli).await;
         assert!(result.is_ok());
         let res = result.unwrap();
-        if let Response::Http(parts) = res {
-            assert_eq!(parts.status, StatusCode::OK)
+        if let RcurlResponse::Http(parts) = res {
+            assert_eq!(parts.status(), StatusCode::OK)
         } else {
             assert!(false);
         }
@@ -115,8 +116,8 @@ mod tests {
         let result = do_request(cli).await;
         assert!(result.is_ok());
         let res = result.unwrap();
-        if let Response::Http(parts) = res {
-            assert_eq!(parts.status, StatusCode::OK)
+        if let RcurlResponse::Http(parts) = res {
+            assert_eq!(parts.status(), StatusCode::OK)
         } else {
             assert!(false);
         }
@@ -129,12 +130,13 @@ mod tests {
         cli.user_agent_option = Some(default_agent.to_string());
         let result = do_request(cli).await;
         assert!(result.is_ok());
-        let res = result.unwrap();
-        if let Response::Http(parts) = res {
-            assert_eq!(parts.status, StatusCode::OK);
-            println!("{:?}", parts);
-            let user_agent_option = parts.headers.get("User-Agent");
-            assert_eq!(user_agent_option.unwrap().to_str().unwrap(), default_agent);
+        let rcurl_response = result.unwrap();
+        if let RcurlResponse::Http(response) = rcurl_response {
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = response.into_body();
+            let s = body.collect().await.unwrap();
+            let body_str = String::from_utf8(s.to_bytes().to_vec()).unwrap();
+            assert!(body_str.contains(default_agent));
         } else {
             assert!(false);
         }
