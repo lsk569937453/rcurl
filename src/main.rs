@@ -66,6 +66,19 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn test_https_get_ok() {
+        let mut cli = Cli::new();
+        cli.url = "https://httpbin.org/get".to_string();
+        let result = do_request(cli).await;
+        assert!(result.is_ok());
+        let rcurl_res = result.unwrap();
+        if let RcurlResponse::Http(response) = rcurl_res {
+            assert_eq!(response.status(), StatusCode::OK)
+        } else {
+            assert!(false);
+        }
+    }
+    #[tokio::test]
     async fn test_http_post_ok() {
         let mut cli = Cli::new();
         cli.url = "http://httpbin.org/post".to_string();
