@@ -1,8 +1,8 @@
 use clap::Parser;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about, arg_required_else_help = true)]
 // #[clap(disable_help_flag = true)]
-
 pub struct Cli {
     /// The request url,like http://www.google.com
     pub url: String,
@@ -61,7 +61,6 @@ pub struct Cli {
         short = 'o',
         value_name = "file",
         default_missing_value = "none",
-        group = "http"
     )]
     pub file_path_option: Option<String>,
 
@@ -80,7 +79,7 @@ pub struct Cli {
     #[arg(long = "head", short = 'I', group = "http")]
     pub header_option: bool,
     /// Retrieve only the bytes within RANGE
-    #[arg(short = 'r', long = "range", value_name = "range", group = "http")]
+    #[arg(short = 'r', long = "range", value_name = "range")]
     pub range_option: Option<String>,
     ///  Make the operation more talkative
     #[arg(short = 'v', long = "verbose")]
@@ -92,6 +91,7 @@ pub struct Cli {
     // #[arg(long, action = clap::ArgAction::Help)]
     // pub help_all: bool,
 }
+
 impl Cli {
     pub fn new() -> Self {
         Cli {

@@ -2,19 +2,24 @@
 extern crate anyhow;
 #[macro_use]
 extern crate tracing;
-use clap::Parser;
-mod ftp;
-use http::handler::http_request;
-use http_body_util::BodyExt;
-use hyper_util::client::legacy::Error;
-use tracing::Level;
-mod http;
-use crate::ftp::handler::ftp_request;
-mod cli;
+
 use clap::CommandFactory;
-mod response;
+use clap::Parser;
+use http_body_util::BodyExt;
+
+use http::handler::http_request;
+
 use crate::cli::app_config::Cli;
+use crate::ftp::handler::ftp_request;
 use crate::response::res::RcurlResponse;
+
+mod ftp;
+
+mod http;
+
+mod cli;
+
+mod response;
 
 #[tokio::main]
 async fn main() {
@@ -24,6 +29,7 @@ async fn main() {
         println!("{}", e);
     }
 }
+
 async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
     let url = cli.url.clone();
     let uri: hyper::Uri = url.parse()?;
@@ -46,12 +52,16 @@ async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
         Err(anyhow!("Can not find scheme in the uri:{}.", uri))?
     }
 }
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::response::res::RcurlResponse;
-    use crate::{cli::app_config::Cli, do_request};
     use ::http::StatusCode;
+
+    use crate::{cli::app_config::Cli, do_request};
+    use crate::response::res::RcurlResponse;
+
+    use super::*;
+
     #[tokio::test]
     async fn test_http_get_ok() {
         let mut cli = Cli::new();
@@ -65,6 +75,7 @@ mod tests {
             assert!(false);
         }
     }
+
     #[tokio::test]
     async fn test_https_get_ok() {
         let mut cli = Cli::new();
@@ -78,6 +89,38 @@ mod tests {
             assert!(false);
         }
     }
+
+    #[tokio::test]
+    async fn test_http_get_debug_ok() {
+        let mut cli = Cli::new();
+        cli.url = "https://httpbin.org/get".to_string();
+        cli.debug = true;
+        cli.skip_certificate_validate = true;
+        let result = do_request(cli).await;
+        assert!(result.is_ok());
+        let rcurl_res = result.unwrap();
+        if let RcurlResponse::Http(response) = rcurl_res {
+            assert_eq!(response.status(), StatusCode::OK)
+        } else {
+            assert!(false);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_http_get_debug_ok2() {
+        let mut cli = Cli::new();
+        cli.url = "https://httpbin.org/get".to_string();
+        cli.file_path_option = Some("test.html".to_string());
+        let result = do_request(cli).await;
+        assert!(result.is_ok());
+        let rcurl_res = result.unwrap();
+        if let RcurlResponse::Http(response) = rcurl_res {
+            assert_eq!(response.status(), StatusCode::OK)
+        } else {
+            assert!(false);
+        }
+    }
+
     #[tokio::test]
     async fn test_http_post_ok() {
         let mut cli = Cli::new();
@@ -92,6 +135,7 @@ mod tests {
             assert!(false);
         }
     }
+
     #[tokio::test]
     async fn test_http_post_body_ok() {
         let mut cli = Cli::new();
@@ -107,6 +151,7 @@ mod tests {
             assert!(false);
         }
     }
+
     #[tokio::test]
     async fn test_http_post_form() {
         let mut cli = Cli::new();
@@ -126,6 +171,23 @@ mod tests {
             assert!(false);
         }
     }
+
+    #[tokio::test]
+    async fn test_http_post_form_with_file() {
+        let mut cli = Cli::new();
+        cli.url = "http://httpbin.org/post".to_string();
+        let default_form = "a=@LICENSE";
+        cli.form_option = vec![default_form.to_string()];
+        let result = do_request(cli).await;
+        assert!(result.is_ok());
+        let res = result.unwrap();
+        if let RcurlResponse::Http(response) = res {
+            assert_eq!(response.status(), StatusCode::OK);
+        } else {
+            assert!(false);
+        }
+    }
+
     #[tokio::test]
     async fn test_http_put_ok() {
         let mut cli = Cli::new();
@@ -140,6 +202,7 @@ mod tests {
             assert!(false);
         }
     }
+
     #[tokio::test]
     async fn test_http_user_agent_ok() {
         let mut cli = Cli::new();
@@ -159,6 +222,7 @@ mod tests {
             assert!(false);
         }
     }
+
     #[tokio::test]
     async fn test_http_referer_ok() {
         let mut cli = Cli::new();
@@ -178,6 +242,7 @@ mod tests {
             assert!(false);
         }
     }
+
     #[tokio::test]
     async fn test_http_head_request_ok() {
         let mut cli = Cli::new();
@@ -192,6 +257,35 @@ mod tests {
             let s = body.collect().await.unwrap().to_bytes();
             assert!(s.len() == 0);
         } else {
+            assert!(false);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ftp_list_ok() {
+        let mut cli = Cli::new();
+        cli.url = "ftp://test.rebex.net:21/".to_string();
+        cli.authority_option = Some("demo:password".to_string());
+        let result = do_request(cli).await;
+        assert!(result.is_ok());
+        let rcurl_response = result.unwrap();
+        if let RcurlResponse::Ftp(response) = rcurl_response {} else {
+            assert!(false);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ftp_download_file_ok() {
+        let mut cli = Cli::new();
+        cli.url = "ftp://test.rebex.net:21/".to_string();
+        cli.file_path_option = Some("test.html".to_string());
+        cli.range_option = Some("0-1000".to_string());
+        cli.authority_option = Some("demo:password".to_string());
+
+        let result = do_request(cli).await;
+        assert!(result.is_ok());
+        let rcurl_response = result.unwrap();
+        if let RcurlResponse::Ftp(response) = rcurl_response {} else {
             assert!(false);
         }
     }

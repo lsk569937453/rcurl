@@ -1,5 +1,7 @@
-use crate::cli::app_config::Cli;
-use crate::ftp;
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
+
 use async_std::fs::File;
 use async_std::path::Path;
 use env_logger::Builder;
@@ -7,21 +9,20 @@ use futures::io::BufReader;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use log::LevelFilter;
-use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
+use suppaftp::{AsyncNativeTlsConnector, AsyncNativeTlsFtpStream};
 use suppaftp::async_native_tls::TlsConnector;
 use suppaftp::types::FileType;
-use suppaftp::{AsyncNativeTlsConnector, AsyncNativeTlsFtpStream};
 use tokio::fs::OpenOptions;
-use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-use tokio::io::{self, AsyncBufReadExt};
+
+use crate::cli::app_config::Cli;
+
 #[derive(Debug)]
 pub struct ProgressBarIter<T> {
     pub it: T,
     pub progress: ProgressBar,
 }
+
 impl<W: futures::io::AsyncRead + Unpin> futures::io::AsyncRead for ProgressBarIter<W> {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -37,6 +38,7 @@ impl<W: futures::io::AsyncRead + Unpin> futures::io::AsyncRead for ProgressBarIt
         }
     }
 }
+
 pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
     let log_level_hyper = if cli.debug {
         LevelFilter::Trace
@@ -45,7 +47,7 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
     };
 
     // init logger
-    Builder::new().filter_level(log_level_hyper).init();
+    let _ = Builder::new().filter_level(log_level_hyper).try_init();
     let uri: hyper::Uri = cli.url.parse()?;
     let host = uri.host().ok_or(anyhow!(""))?;
     let port = uri.port_u16().unwrap_or(21);
@@ -82,8 +84,8 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
             .to_string_lossy();
         let pb = ProgressBar::new(metadata.len());
         pb.set_style(ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-        ?
-        .progress_chars("#>-"));
+            ?
+            .progress_chars("#>-"));
         let mut pro = ProgressBarIter {
             it: reader,
             progress: pb.clone(),
@@ -97,13 +99,16 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
             .list(None)
             .await
             .map_err(|e| anyhow!("Command failed, error:{}", e))?;
-        let str = format!("{:?}", file_list);
-        output(cli, str.as_bytes().to_vec()).await?;
+        let joined = file_list.join("\n");
+
+        output(cli, joined.as_bytes().to_vec()).await?;
     }
     Ok(())
 }
+
 async fn output(cli: Cli, mut item: Vec<u8>) -> Result<(), anyhow::Error> {
-    if let Some(range) = cli.range_option {
+    if let Some(mut range) = cli.range_option {
+        range = format!("bytes={}", range);
         let parsed_range = http_range_header::parse_range_header(&range)?;
         let vec_ranges = parsed_range.validate(item.len() as u64)?;
         let mut concatenated_bytes = Vec::new();
