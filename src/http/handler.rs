@@ -37,22 +37,24 @@ use rustls::crypto::ring::default_provider;
 use futures::StreamExt;
 use http_body_util::BodyExt;
 
+use http::response::Parts;
+use http_body_util::combinators::BoxBody;
+use hyper::body::Buf;
 use rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
 use rustls::crypto::CryptoProvider;
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature};
 use rustls::pki_types::ServerName;
 use rustls::pki_types::{CertificateDer, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct};
+use std::cmp::min;
 use std::convert::From;
+use std::convert::Infallible;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::io::Write as WriteStd;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio_rustls::TlsConnector;
-
-use hyper::body::Buf;
-use std::cmp::min;
-use std::io::Write as WriteStd;
 #[derive(Debug)]
 pub struct NoCertificateVerification(CryptoProvider);
 
@@ -107,20 +109,29 @@ impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
     }
 }
 
-pub async fn handle_response(cli: &Cli, res: Response<Incoming>) -> Result<(), anyhow::Error> {
+pub async fn handle_response(
+    cli: &Cli,
+    res: Response<Incoming>,
+) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
     if cli.header_option {
         println!("{:?} {}", res.version(), res.status());
         for (key, value) in res.headers().iter() {
             println!("{}: {}", key, value.to_str()?);
         }
-        return Ok(());
+        let t = res
+            .map(|b| b.boxed())
+            .map(|item| item.map_err(|_| -> Infallible { unreachable!() }).boxed());
+        return Ok(t);
     }
-    let content_length_option = res.headers().get(CONTENT_LENGTH);
+    let (parts, incoming) = res.into_parts();
+    let mut body_for_test = Full::new(Bytes::from("")).boxed();
+
+    let content_length_option = parts.headers.get(CONTENT_LENGTH);
+
     if let Some(content_lenth_str) = content_length_option {
         let content_length = content_lenth_str.to_str()?.parse::<u64>()?;
 
         if let Some(file_path) = cli.file_path_option.clone() {
-            let incoming = res.into_body();
             let mut body_streaming = BodyStream::new(incoming);
             let mut downloaded = 0;
             let total_size = content_length;
@@ -150,24 +161,27 @@ rcurl to output it to your terminal anyway, or consider '--output
 <FILE>' to save to a file."
                 ));
             }
-            let mut body = res.collect().await?.aggregate();
+            let mut body = incoming.collect().await?.aggregate();
             let dst = body.copy_to_bytes(content_length as usize);
             let response_string = String::from_utf8_lossy(&dst);
+            body_for_test = Full::new(Bytes::from(response_string.clone().to_string())).boxed();
             println!("{}", response_string);
         }
     }
-
-    Ok(())
+    let res = Response::from_parts(parts, body_for_test);
+    Ok(res)
 }
-pub async fn http_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
+pub async fn http_request(
+    cli: Cli,
+    scheme: &str,
+) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
     let log_level_hyper = if cli.debug { Level::TRACE } else { Level::INFO };
 
-    tracing_subscriber::fmt()
-        // Configure formatting settings.
+    let subscriber = tracing_subscriber::fmt()
         .with_level(true)
         .with_max_level(log_level_hyper)
-        // Set the subscriber as the default.
-        .init();
+        .finish();
+    let _ = tracing::subscriber::set_global_default(subscriber);
 
     let mut root_store = RootCertStore::empty();
 
@@ -381,7 +395,7 @@ pub async fn http_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
         }
     }
 
-    handle_response(&cli, res).await?;
+    let parts = handle_response(&cli, res).await?;
 
-    Ok(())
+    Ok(parts)
 }
