@@ -98,12 +98,17 @@ mod tests {
     async fn test_http_post_form() {
         let mut cli = Cli::new();
         cli.url = "http://httpbin.org/post".to_string();
-        cli.form_option = vec!["a=b".to_string()];
+        let default_form = "a=b";
+        cli.form_option = vec![default_form.to_string()];
         let result = do_request(cli).await;
         assert!(result.is_ok());
         let res = result.unwrap();
-        if let RcurlResponse::Http(parts) = res {
-            assert_eq!(parts.status(), StatusCode::OK)
+        if let RcurlResponse::Http(response) = res {
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = response.into_body();
+            let s = body.collect().await.unwrap();
+            let body_str = String::from_utf8(s.to_bytes().to_vec()).unwrap();
+            assert!(body_str.contains(r#""a": "b""#));
         } else {
             assert!(false);
         }
@@ -137,6 +142,42 @@ mod tests {
             let s = body.collect().await.unwrap();
             let body_str = String::from_utf8(s.to_bytes().to_vec()).unwrap();
             assert!(body_str.contains(default_agent));
+        } else {
+            assert!(false);
+        }
+    }
+    #[tokio::test]
+    async fn test_http_referer_ok() {
+        let mut cli = Cli::new();
+        cli.url = "http://httpbin.org/get".to_string();
+        let default_refer = "default_refer";
+        cli.refer_option = Some(default_refer.to_string());
+        let result = do_request(cli).await;
+        assert!(result.is_ok());
+        let rcurl_response = result.unwrap();
+        if let RcurlResponse::Http(response) = rcurl_response {
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = response.into_body();
+            let s = body.collect().await.unwrap();
+            let body_str = String::from_utf8(s.to_bytes().to_vec()).unwrap();
+            assert!(body_str.contains(default_refer));
+        } else {
+            assert!(false);
+        }
+    }
+    #[tokio::test]
+    async fn test_http_head_request_ok() {
+        let mut cli = Cli::new();
+        cli.url = "http://httpbin.org/get".to_string();
+        cli.header_option = true;
+        let result = do_request(cli).await;
+        assert!(result.is_ok());
+        let rcurl_response = result.unwrap();
+        if let RcurlResponse::Http(response) = rcurl_response {
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = response.into_body();
+            let s = body.collect().await.unwrap().to_bytes();
+            assert!(s.len() == 0);
         } else {
             assert!(false);
         }
