@@ -8,11 +8,13 @@ use hyper::header::HOST;
 use hyper::header::REFERER;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
+use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use mime_guess::mime;
 use rustls::RootCertStore;
 use std::time::Duration;
 use tokio::net::TcpStream;
+
 use tokio::time::timeout;
 use tracing::{Instrument, Level};
 
@@ -40,6 +42,7 @@ use http_body_util::BodyExt;
 use http::response::Parts;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Buf;
+use hyper_util::client::legacy::Client;
 use rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
 use rustls::crypto::CryptoProvider;
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature};
@@ -334,53 +337,43 @@ pub async fn http_request(
     let request_future = {
         trace!("Start request");
         let fut = if scheme == "https" {
-            let connector = TlsConnector::from(Arc::new(tls_config));
-            let domain = pki_types::ServerName::try_from(host)
-                .map_err(|e| anyhow!("{}", e))?
-                .to_owned();
-            let tls_stream = connector.connect(domain, stream).await?;
-            let stream_io = TokioIo::new(tls_stream);
+            let https = hyper_rustls::HttpsConnectorBuilder::new()
+                .with_tls_config(tls_config)
+                .https_only()
+                .enable_all_versions()
+                .build();
+            let https_clientt: Client<_, Full<Bytes>> =
+                Client::builder(TokioExecutor::new()).build(https);
+            // let domain = pki_types::ServerName::try_from(host)
+            //     .map_err(|e| anyhow!("{}", e))?
+            //     .to_owned();
+            // let tls_stream = connector.connect(domain, stream).await?;
+            // let stream_io = TokioIo::new(tls_stream);
 
-            let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io)
-                .instrument(info_span!("Https Handshake"))
-                .await?;
-            tokio::task::spawn(async move {
-                if let Err(err) = conn
-                    .instrument(info_span!(
-                        "rcurl",
-                        localAddr=%local_addr,
-                         remoteAddr=remote_addr,
+            // let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io)
+            //     .instrument(info_span!("Https Handshake"))
+            //     .await?;
+            // tokio::task::spawn(async move {
+            //     if let Err(err) = conn
+            //         .instrument(info_span!(
+            //             "rcurl",
+            //             localAddr=%local_addr,
+            //              remoteAddr=remote_addr,
 
-                    ))
-                    .await
-                {
-                    println!("Connection failed: {:?}", err);
-                }
-            });
-            sender.send_request(request)
+            //         ))
+            //         .await
+            //     {
+            //         println!("Connection failed: {:?}", err);
+            //     }
+            // });
+            https_clientt.request(request)
+            // sender.send_request(request)
         } else {
-            let stream_io = TokioIo::new(stream);
-
-            let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io)
-                .instrument(info_span!("Http Handshake"))
-                .await?;
-            tokio::task::spawn(
-                async move {
-                    if let Err(err) = conn.await {
-                        println!("Connection failed: {:?}", err);
-                    }
-                }
-                .instrument(
-                    info_span!(
-                        "addr",
-                        localAddr=%local_addr,
-                        remoteAddr=remote_addr,
-
-                    )
-                    .or_current(),
-                ),
-            );
-            sender.send_request(request)
+            let http_client = Client::builder(TokioExecutor::new())
+                .http1_title_case_headers(true)
+                .http1_preserve_header_case(true)
+                .build_http();
+            http_client.request(request)
         };
         fut
     };
