@@ -1,6 +1,7 @@
 use crate::cli::app_config::Cli;
 use bytes::Bytes;
 
+use http::header::ACCEPT;
 use http_body_util::Full;
 use hyper::header::CONTENT_TYPE;
 use hyper::header::COOKIE;
@@ -208,6 +209,7 @@ pub async fn http_request(
     .with_protocol_versions(&versions)?
     .with_root_certificates(root_store)
     .with_no_client_auth();
+
     tls_config.key_log = Arc::new(rustls::KeyLogFile::new());
 
     if cli.skip_certificate_validate {
@@ -241,6 +243,7 @@ pub async fn http_request(
         request_builder =
             request_builder.header(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
     }
+    request_builder = request_builder.header(ACCEPT, HeaderValue::from_str("*/*")?);
     request_builder = request_builder.header(
         HOST,
         HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
@@ -302,9 +305,10 @@ pub async fn http_request(
         if split.len() == 2 {
             let key = &split[0];
             let value = &split[1];
+            let new_value = value.trim_start();
             request_builder = request_builder.header(
                 HeaderName::from_str(key.as_str())?,
-                HeaderValue::from_str(value.as_str())?,
+                HeaderValue::from_str(new_value)?,
             );
         } else {
             return Err(anyhow!("header error"));
@@ -340,7 +344,7 @@ pub async fn http_request(
             let https = hyper_rustls::HttpsConnectorBuilder::new()
                 .with_tls_config(tls_config)
                 .https_only()
-                .enable_all_versions()
+                .enable_http1()
                 .build();
             let https_clientt: Client<_, Full<Bytes>> =
                 Client::builder(TokioExecutor::new()).build(https);
