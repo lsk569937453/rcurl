@@ -43,6 +43,7 @@ use http_body_util::BodyExt;
 use http::response::Parts;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Buf;
+use hyper::HeaderMap;
 use hyper_util::client::legacy::Client;
 use rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
 use rustls::crypto::CryptoProvider;
@@ -218,14 +219,6 @@ pub async fn http_request(
             .set_certificate_verifier(Arc::new(NoCertificateVerification::new(default_provider())));
     };
     let uri: hyper::Uri = cli.url.parse()?;
-    let host = uri.host().expect("uri has no host");
-    let default_port = if let Some(port) = uri.port_u16() {
-        port
-    } else if uri.scheme_str() == Some("https") {
-        443
-    } else {
-        80
-    };
     let mut method = String::from("GET");
     let mut content_type_option = None;
 
@@ -239,12 +232,12 @@ pub async fn http_request(
     let mut request_builder = Request::builder()
         .method(method.as_str())
         .uri(cli.url.clone());
+    let mut header_map = HeaderMap::new();
     if let Some(content_type) = content_type_option {
-        request_builder =
-            request_builder.header(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
+        header_map.insert(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
     }
-    request_builder = request_builder.header(ACCEPT, HeaderValue::from_str("*/*")?);
-    request_builder = request_builder.header(
+    header_map.insert(ACCEPT, HeaderValue::from_str("*/*")?);
+    header_map.insert(
         HOST,
         HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
     );
@@ -252,16 +245,16 @@ pub async fn http_request(
         .user_agent_option
         .clone()
         .unwrap_or(format!("rcur/{}", env!("CARGO_PKG_VERSION").to_string()));
-    request_builder = request_builder.header(USER_AGENT, HeaderValue::from_str(&user_agent)?);
+    header_map.insert(USER_AGENT, HeaderValue::from_str(&user_agent)?);
     if let Some(cookie) = cli.cookie_option.clone() {
-        request_builder = request_builder.header(COOKIE, HeaderValue::from_str(&cookie)?);
+        header_map.insert(COOKIE, HeaderValue::from_str(&cookie)?);
     }
     if let Some(range) = cli.range_option.clone() {
         let ranges_format = format!("bytes={}", range);
-        request_builder = request_builder.header(RANGE, HeaderValue::from_str(&ranges_format)?);
+        header_map.insert(RANGE, HeaderValue::from_str(&ranges_format)?);
     }
     if let Some(refer) = cli.refer_option.clone() {
-        request_builder = request_builder.header(REFERER, HeaderValue::from_str(&refer)?);
+        header_map.insert(REFERER, HeaderValue::from_str(&refer)?);
     }
     let mut body_bytes = Bytes::new();
     if cli.form_option.len() != 0 {
@@ -302,17 +295,22 @@ pub async fn http_request(
     }
     for x in cli.headers.clone() {
         let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();
+
         if split.len() == 2 {
             let key = &split[0];
             let value = &split[1];
             let new_value = value.trim_start();
-            request_builder = request_builder.header(
+
+            header_map.insert(
                 HeaderName::from_str(key.as_str())?,
                 HeaderValue::from_str(new_value)?,
             );
         } else {
             return Err(anyhow!("header error"));
         }
+    }
+    for (key, val) in header_map {
+        request_builder = request_builder.header(key.ok_or(anyhow!(""))?, val);
     }
     let content_length = body_bytes.len();
     let body = Full::new(body_bytes);
@@ -331,11 +329,11 @@ pub async fn http_request(
         println!("> Content-Length: {}", content_length);
     }
 
-    let port = uri.port_u16().unwrap_or(default_port);
-    let addr = format!("{}:{}", host, port);
-    let stream = TcpStream::connect(addr.clone()).await?;
-    let remote_addr = stream.peer_addr()?.to_string();
-    let local_addr = stream.local_addr()?.to_string();
+    // let port = uri.port_u16().unwrap_or(default_port);
+    // let addr = format!("{}:{}", host, port);
+    // let stream = TcpStream::connect(addr.clone()).await?;
+    // let remote_addr = stream.peer_addr()?.to_string();
+    // let local_addr = stream.local_addr()?.to_string();
     let span = tracing::info_span!("Rcurl");
     let _enter = span.enter();
     let request_future = {
@@ -344,7 +342,7 @@ pub async fn http_request(
             let https = hyper_rustls::HttpsConnectorBuilder::new()
                 .with_tls_config(tls_config)
                 .https_only()
-                .enable_http1()
+                .enable_http2()
                 .build();
             let https_clientt: Client<_, Full<Bytes>> =
                 Client::builder(TokioExecutor::new()).build(https);
