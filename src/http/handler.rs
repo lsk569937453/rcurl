@@ -1,6 +1,7 @@
 use crate::cli::app_config::Cli;
 use bytes::Bytes;
 
+use env_logger::Builder;
 use http::header::ACCEPT;
 use http_body_util::Full;
 use hyper::header::CONTENT_TYPE;
@@ -9,6 +10,7 @@ use hyper::header::HOST;
 use hyper::header::REFERER;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
+use hyper::Version;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use mime_guess::mime;
@@ -35,6 +37,7 @@ use hyper::header::CONTENT_LENGTH;
 use hyper::Response;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
+use log::LevelFilter;
 use rustls::crypto::ring::default_provider;
 
 use futures::StreamExt;
@@ -180,14 +183,6 @@ pub async fn http_request(
     cli: Cli,
     scheme: &str,
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
-    let log_level_hyper = if cli.debug { Level::TRACE } else { Level::INFO };
-
-    let subscriber = tracing_subscriber::fmt()
-        .with_level(true)
-        .with_max_level(log_level_hyper)
-        .finish();
-    let _ = tracing::subscriber::set_global_default(subscriber);
-
     let mut root_store = RootCertStore::empty();
 
     if let Some(file_path) = cli.certificate_path_option.clone() {
@@ -342,7 +337,7 @@ pub async fn http_request(
             let https = hyper_rustls::HttpsConnectorBuilder::new()
                 .with_tls_config(tls_config)
                 .https_only()
-                .enable_http2()
+                .enable_all_versions()
                 .build();
             let https_clientt: Client<_, Full<Bytes>> =
                 Client::builder(TokioExecutor::new()).build(https);

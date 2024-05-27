@@ -2,9 +2,9 @@
 extern crate anyhow;
 #[macro_use]
 extern crate tracing;
-
 use clap::CommandFactory;
 use clap::Parser;
+use env_logger::Builder;
 use http_body_util::BodyExt;
 
 use http::handler::http_request;
@@ -12,6 +12,8 @@ use http::handler::http_request;
 use crate::cli::app_config::Cli;
 use crate::ftp::handler::ftp_request;
 use crate::response::res::RcurlResponse;
+use log::LevelFilter;
+use tracing::Level;
 
 mod ftp;
 
@@ -31,6 +33,21 @@ async fn main() {
 }
 
 async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
+    let log_level_hyper = if cli.debug { Level::TRACE } else { Level::INFO };
+
+    let subscriber = tracing_subscriber::fmt()
+        .with_level(true)
+        .with_max_level(log_level_hyper)
+        .finish();
+    let _ = tracing::subscriber::set_global_default(subscriber);
+    let log_level_hyper = if cli.debug {
+        LevelFilter::Trace
+    } else {
+        LevelFilter::Info
+    };
+
+    // init logger
+    let _ = Builder::new().filter_level(log_level_hyper).try_init();
     let url = cli.url.clone();
     let uri: hyper::Uri = url.parse()?;
     if let Some(scheme) = uri.scheme() {
@@ -57,8 +74,8 @@ async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
 mod tests {
     use ::http::StatusCode;
 
-    use crate::{cli::app_config::Cli, do_request};
     use crate::response::res::RcurlResponse;
+    use crate::{cli::app_config::Cli, do_request};
 
     use super::*;
 
@@ -269,7 +286,8 @@ mod tests {
         let result = do_request(cli).await;
         assert!(result.is_ok());
         let rcurl_response = result.unwrap();
-        if let RcurlResponse::Ftp(response) = rcurl_response {} else {
+        if let RcurlResponse::Ftp(response) = rcurl_response {
+        } else {
             assert!(false);
         }
     }
@@ -285,7 +303,8 @@ mod tests {
         let result = do_request(cli).await;
         assert!(result.is_ok());
         let rcurl_response = result.unwrap();
-        if let RcurlResponse::Ftp(response) = rcurl_response {} else {
+        if let RcurlResponse::Ftp(response) = rcurl_response {
+        } else {
             assert!(false);
         }
     }
