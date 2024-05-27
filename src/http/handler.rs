@@ -232,10 +232,10 @@ pub async fn http_request(
         header_map.insert(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
     }
     header_map.insert(ACCEPT, HeaderValue::from_str("*/*")?);
-    header_map.insert(
-        HOST,
-        HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
-    );
+    // header_map.insert(
+    //     HOST,
+    //     HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
+    // );
     let user_agent = cli
         .user_agent_option
         .clone()
