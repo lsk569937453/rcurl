@@ -7,52 +7,36 @@ pub struct Cli {
     /// The request url,like http://www.google.com
     pub url: String,
     ///  Specify request method to use
-    #[arg(short = 'X', long = "request", value_name = "method", group = "http")]
+    #[arg(short = 'X', long = "request", value_name = "method")]
     pub method_option: Option<String>,
     /// HTTP POST data.
-    #[arg(short = 'd', long = "data", value_name = "data", group = "http")]
+    #[arg(short = 'd', long = "data", value_name = "data")]
     pub body_option: Option<String>,
     /// Specify multipart MIME data.
-    #[arg(
-        short = 'F',
-        long = "form",
-        value_name = "name=content",
-        group = "http"
-    )]
+    #[arg(short = 'F', long = "form", value_name = "name=content")]
     pub form_option: Vec<String>,
     /// The http headers.
-    #[arg(
-        short = 'H',
-        long = "header",
-        value_name = "header/@file",
-        group = "http"
-    )]
+    #[arg(short = 'H', long = "header", value_name = "header/@file")]
     pub headers: Vec<String>,
     /// The pem path.
-    #[arg(short = 'c', long, group = "http")]
+    #[arg(short = 'c', long)]
     pub certificate_path_option: Option<String>,
     /// Server user and password
-    #[arg(
-        short = 'u',
-        long = "user",
-        group = "http",
-        value_name = "user:password"
-    )]
+    #[arg(short = 'u', long = "user", value_name = "user:password")]
     pub authority_option: Option<String>,
     ///  Send User-Agent <name> to server
-    #[arg(short = 'A', long = "user-agent", value_name = "name", group = "http")]
+    #[arg(short = 'A', long = "user-agent", value_name = "name")]
     pub user_agent_option: Option<String>,
     /// The Cookie option.
     #[arg(
         short = 'b',
         long = "cookie",
         value_name = "data|filename",
-        group = "http",
         hide_short_help = true
     )]
     pub cookie_option: Option<String>,
     ///  Referrer URL
-    #[arg(short = 'e', long = "referer", value_name = "URL", group = "http")]
+    #[arg(short = 'e', long = "referer", value_name = "URL")]
     pub refer_option: Option<String>,
     ///  Write to file instead of stdout.
     #[arg(
@@ -60,7 +44,7 @@ pub struct Cli {
         long = "output",
         short = 'o',
         value_name = "file",
-        default_missing_value = "none",
+        default_missing_value = "none"
     )]
     pub file_path_option: Option<String>,
 
