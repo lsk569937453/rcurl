@@ -324,11 +324,6 @@ pub async fn http_request(
         println!("> Content-Length: {}", content_length);
     }
 
-    // let port = uri.port_u16().unwrap_or(default_port);
-    // let addr = format!("{}:{}", host, port);
-    // let stream = TcpStream::connect(addr.clone()).await?;
-    // let remote_addr = stream.peer_addr()?.to_string();
-    // let local_addr = stream.local_addr()?.to_string();
     let span = tracing::info_span!("Rcurl");
     let _enter = span.enter();
     let request_future = {
@@ -341,30 +336,7 @@ pub async fn http_request(
                 .build();
             let https_clientt: Client<_, Full<Bytes>> =
                 Client::builder(TokioExecutor::new()).build(https);
-            // let domain = pki_types::ServerName::try_from(host)
-            //     .map_err(|e| anyhow!("{}", e))?
-            //     .to_owned();
-            // let tls_stream = connector.connect(domain, stream).await?;
-            // let stream_io = TokioIo::new(tls_stream);
-
-            // let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io)
-            //     .instrument(info_span!("Https Handshake"))
-            //     .await?;
-            // tokio::task::spawn(async move {
-            //     if let Err(err) = conn
-            //         .instrument(info_span!(
-            //             "rcurl",
-            //             localAddr=%local_addr,
-            //              remoteAddr=remote_addr,
-
-            //         ))
-            //         .await
-            //     {
-            //         println!("Connection failed: {:?}", err);
-            //     }
-            // });
             https_clientt.request(request)
-            // sender.send_request(request)
         } else {
             let http_client = Client::builder(TokioExecutor::new())
                 .http1_title_case_headers(true)
