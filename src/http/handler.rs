@@ -239,7 +239,7 @@ pub async fn http_request(
     let user_agent = cli
         .user_agent_option
         .clone()
-        .unwrap_or(format!("rcur/{}", env!("CARGO_PKG_VERSION").to_string()));
+        .unwrap_or(format!("rcurl/{}", env!("CARGO_PKG_VERSION").to_string()));
     header_map.insert(USER_AGENT, HeaderValue::from_str(&user_agent)?);
     if let Some(cookie) = cli.cookie_option.clone() {
         header_map.insert(COOKIE, HeaderValue::from_str(&cookie)?);
