@@ -24,10 +24,13 @@ Options:
   -e, --referer <URL>                                      Referrer URL
   -o, --output <file>                                      Write to file instead of stdout
   -T, --upload-file <file>                                 Transfer local FILE to destination
+  -Q, --quote <command>                                    Send command(s) to server before transfer
   -k, --insecure                                           Allow insecure server connections
   -I, --head                                               Show document info only
   -r, --range <range>                                      Retrieve only the bytes within RANGE
   -v, --verbose                                            Make the operation more talkative
+      --http2
+      --http2-prior-knowledge
   -h, --help                                               Print help
   -V, --version                                            Print version
 ```

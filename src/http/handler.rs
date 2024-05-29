@@ -227,6 +227,9 @@ pub async fn http_request(
     let mut request_builder = Request::builder()
         .method(method.as_str())
         .uri(cli.url.clone());
+    if cli.http2_prior_knowledge {
+        request_builder = request_builder.version(hyper::Version::HTTP_2);
+    }
     let mut header_map = HeaderMap::new();
     if let Some(content_type) = content_type_option {
         header_map.insert(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
@@ -329,20 +332,33 @@ pub async fn http_request(
     let request_future = {
         trace!("Start request");
         let fut = if scheme == "https" {
-            let https = hyper_rustls::HttpsConnectorBuilder::new()
+            let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
                 .with_tls_config(tls_config)
-                .https_only()
-                .enable_all_versions()
-                .build();
+                .https_only();
+            let https_connector = if cli.http2 {
+                connector_builder.enable_all_versions().build()
+            } else if cli.http2_prior_knowledge {
+                connector_builder.enable_http2().build()
+            } else {
+                connector_builder.enable_http1().build()
+            };
+
             let https_clientt: Client<_, Full<Bytes>> =
-                Client::builder(TokioExecutor::new()).build(https);
+                Client::builder(TokioExecutor::new()).build(https_connector);
             https_clientt.request(request)
         } else {
-            let http_client = Client::builder(TokioExecutor::new())
+            let mut http_client_builder = Client::builder(TokioExecutor::new());
+            http_client_builder
                 .http1_title_case_headers(true)
-                .http1_preserve_header_case(true)
-                .build_http();
-            http_client.request(request)
+                .http1_preserve_header_case(true);
+            let https_connector = if cli.http2 {
+                http_client_builder.http2_only(false).build_http()
+            } else if cli.http2_prior_knowledge {
+                http_client_builder.http2_only(true).build_http()
+            } else {
+                http_client_builder.build_http()
+            };
+            https_connector.request(request)
         };
         fut
     };
