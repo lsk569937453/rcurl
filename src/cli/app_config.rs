@@ -28,12 +28,7 @@ pub struct Cli {
     #[arg(short = 'A', long = "user-agent", value_name = "name")]
     pub user_agent_option: Option<String>,
     /// The Cookie option.
-    #[arg(
-        short = 'b',
-        long = "cookie",
-        value_name = "data|filename",
-        hide_short_help = true
-    )]
+    #[arg(short = 'b', long = "cookie", value_name = "data|filename")]
     pub cookie_option: Option<String>,
     ///  Referrer URL
     #[arg(short = 'e', long = "referer", value_name = "URL")]
@@ -47,7 +42,6 @@ pub struct Cli {
         default_missing_value = "none"
     )]
     pub file_path_option: Option<String>,
-
     ///  Transfer local FILE to destination
     #[arg(long = "upload-file", short = 'T', value_name = "file")]
     pub uploadfile_option: Option<String>,
@@ -68,6 +62,10 @@ pub struct Cli {
     ///  Make the operation more talkative
     #[arg(short = 'v', long = "verbose")]
     pub debug: bool,
+    #[arg(long = "http2")]
+    pub http2: bool,
+    #[arg(long = "http2-prior-knowledge")]
+    pub http2_prior_knowledge: bool,
     // /// Print help
     // #[arg(short, long, action = clap::ArgAction::Help)]
     // pub help: bool,
@@ -95,6 +93,8 @@ impl Cli {
             skip_certificate_validate: false,
             header_option: false,
             range_option: None,
+            http2: false,
+            http2_prior_knowledge: false,
             debug: false,
             // help: false,
             // help_all: false,

@@ -1,6 +1,7 @@
 use crate::cli::app_config::Cli;
 use bytes::Bytes;
 
+use env_logger::Builder;
 use http::header::ACCEPT;
 use http_body_util::Full;
 use hyper::header::CONTENT_TYPE;
@@ -9,6 +10,7 @@ use hyper::header::HOST;
 use hyper::header::REFERER;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
+use hyper::Version;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use mime_guess::mime;
@@ -35,6 +37,7 @@ use hyper::header::CONTENT_LENGTH;
 use hyper::Response;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
+use log::LevelFilter;
 use rustls::crypto::ring::default_provider;
 
 use futures::StreamExt;
@@ -43,6 +46,7 @@ use http_body_util::BodyExt;
 use http::response::Parts;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Buf;
+use hyper::HeaderMap;
 use hyper_util::client::legacy::Client;
 use rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
 use rustls::crypto::CryptoProvider;
@@ -179,14 +183,6 @@ pub async fn http_request(
     cli: Cli,
     scheme: &str,
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
-    let log_level_hyper = if cli.debug { Level::TRACE } else { Level::INFO };
-
-    let subscriber = tracing_subscriber::fmt()
-        .with_level(true)
-        .with_max_level(log_level_hyper)
-        .finish();
-    let _ = tracing::subscriber::set_global_default(subscriber);
-
     let mut root_store = RootCertStore::empty();
 
     if let Some(file_path) = cli.certificate_path_option.clone() {
@@ -218,14 +214,6 @@ pub async fn http_request(
             .set_certificate_verifier(Arc::new(NoCertificateVerification::new(default_provider())));
     };
     let uri: hyper::Uri = cli.url.parse()?;
-    let host = uri.host().expect("uri has no host");
-    let default_port = if let Some(port) = uri.port_u16() {
-        port
-    } else if uri.scheme_str() == Some("https") {
-        443
-    } else {
-        80
-    };
     let mut method = String::from("GET");
     let mut content_type_option = None;
 
@@ -239,29 +227,32 @@ pub async fn http_request(
     let mut request_builder = Request::builder()
         .method(method.as_str())
         .uri(cli.url.clone());
-    if let Some(content_type) = content_type_option {
-        request_builder =
-            request_builder.header(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
+    if cli.http2_prior_knowledge {
+        request_builder = request_builder.version(hyper::Version::HTTP_2);
     }
-    request_builder = request_builder.header(ACCEPT, HeaderValue::from_str("*/*")?);
-    request_builder = request_builder.header(
-        HOST,
-        HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
-    );
+    let mut header_map = HeaderMap::new();
+    if let Some(content_type) = content_type_option {
+        header_map.insert(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
+    }
+    header_map.insert(ACCEPT, HeaderValue::from_str("*/*")?);
+    // header_map.insert(
+    //     HOST,
+    //     HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
+    // );
     let user_agent = cli
         .user_agent_option
         .clone()
-        .unwrap_or(format!("rcur/{}", env!("CARGO_PKG_VERSION").to_string()));
-    request_builder = request_builder.header(USER_AGENT, HeaderValue::from_str(&user_agent)?);
+        .unwrap_or(format!("rcurl/{}", env!("CARGO_PKG_VERSION").to_string()));
+    header_map.insert(USER_AGENT, HeaderValue::from_str(&user_agent)?);
     if let Some(cookie) = cli.cookie_option.clone() {
-        request_builder = request_builder.header(COOKIE, HeaderValue::from_str(&cookie)?);
+        header_map.insert(COOKIE, HeaderValue::from_str(&cookie)?);
     }
     if let Some(range) = cli.range_option.clone() {
         let ranges_format = format!("bytes={}", range);
-        request_builder = request_builder.header(RANGE, HeaderValue::from_str(&ranges_format)?);
+        header_map.insert(RANGE, HeaderValue::from_str(&ranges_format)?);
     }
     if let Some(refer) = cli.refer_option.clone() {
-        request_builder = request_builder.header(REFERER, HeaderValue::from_str(&refer)?);
+        header_map.insert(REFERER, HeaderValue::from_str(&refer)?);
     }
     let mut body_bytes = Bytes::new();
     if cli.form_option.len() != 0 {
@@ -302,17 +293,22 @@ pub async fn http_request(
     }
     for x in cli.headers.clone() {
         let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();
+
         if split.len() == 2 {
             let key = &split[0];
             let value = &split[1];
             let new_value = value.trim_start();
-            request_builder = request_builder.header(
+
+            header_map.insert(
                 HeaderName::from_str(key.as_str())?,
                 HeaderValue::from_str(new_value)?,
             );
         } else {
             return Err(anyhow!("header error"));
         }
+    }
+    for (key, val) in header_map {
+        request_builder = request_builder.header(key.ok_or(anyhow!(""))?, val);
     }
     let content_length = body_bytes.len();
     let body = Full::new(body_bytes);
@@ -331,53 +327,38 @@ pub async fn http_request(
         println!("> Content-Length: {}", content_length);
     }
 
-    let port = uri.port_u16().unwrap_or(default_port);
-    let addr = format!("{}:{}", host, port);
-    let stream = TcpStream::connect(addr.clone()).await?;
-    let remote_addr = stream.peer_addr()?.to_string();
-    let local_addr = stream.local_addr()?.to_string();
     let span = tracing::info_span!("Rcurl");
     let _enter = span.enter();
     let request_future = {
         trace!("Start request");
         let fut = if scheme == "https" {
-            let https = hyper_rustls::HttpsConnectorBuilder::new()
+            let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
                 .with_tls_config(tls_config)
-                .https_only()
-                .enable_http1()
-                .build();
+                .https_only();
+            let https_connector = if cli.http2 {
+                connector_builder.enable_all_versions().build()
+            } else if cli.http2_prior_knowledge {
+                connector_builder.enable_http2().build()
+            } else {
+                connector_builder.enable_http1().build()
+            };
+
             let https_clientt: Client<_, Full<Bytes>> =
-                Client::builder(TokioExecutor::new()).build(https);
-            // let domain = pki_types::ServerName::try_from(host)
-            //     .map_err(|e| anyhow!("{}", e))?
-            //     .to_owned();
-            // let tls_stream = connector.connect(domain, stream).await?;
-            // let stream_io = TokioIo::new(tls_stream);
-
-            // let (mut sender, conn) = hyper::client::conn::http1::handshake(stream_io)
-            //     .instrument(info_span!("Https Handshake"))
-            //     .await?;
-            // tokio::task::spawn(async move {
-            //     if let Err(err) = conn
-            //         .instrument(info_span!(
-            //             "rcurl",
-            //             localAddr=%local_addr,
-            //              remoteAddr=remote_addr,
-
-            //         ))
-            //         .await
-            //     {
-            //         println!("Connection failed: {:?}", err);
-            //     }
-            // });
+                Client::builder(TokioExecutor::new()).build(https_connector);
             https_clientt.request(request)
-            // sender.send_request(request)
         } else {
-            let http_client = Client::builder(TokioExecutor::new())
+            let mut http_client_builder = Client::builder(TokioExecutor::new());
+            http_client_builder
                 .http1_title_case_headers(true)
-                .http1_preserve_header_case(true)
-                .build_http();
-            http_client.request(request)
+                .http1_preserve_header_case(true);
+            let https_connector = if cli.http2 {
+                http_client_builder.http2_only(false).build_http()
+            } else if cli.http2_prior_knowledge {
+                http_client_builder.http2_only(true).build_http()
+            } else {
+                http_client_builder.build_http()
+            };
+            https_connector.request(request)
         };
         fut
     };

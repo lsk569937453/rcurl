@@ -9,9 +9,9 @@ use futures::io::BufReader;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use log::LevelFilter;
-use suppaftp::{AsyncNativeTlsConnector, AsyncNativeTlsFtpStream};
 use suppaftp::async_native_tls::TlsConnector;
 use suppaftp::types::FileType;
+use suppaftp::{AsyncNativeTlsConnector, AsyncNativeTlsFtpStream};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
@@ -40,14 +40,6 @@ impl<W: futures::io::AsyncRead + Unpin> futures::io::AsyncRead for ProgressBarIt
 }
 
 pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
-    let log_level_hyper = if cli.debug {
-        LevelFilter::Trace
-    } else {
-        LevelFilter::Info
-    };
-
-    // init logger
-    let _ = Builder::new().filter_level(log_level_hyper).try_init();
     let uri: hyper::Uri = cli.url.parse()?;
     let host = uri.host().ok_or(anyhow!(""))?;
     let port = uri.port_u16().unwrap_or(21);
