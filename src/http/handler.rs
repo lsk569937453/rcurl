@@ -15,6 +15,7 @@ use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use mime_guess::mime;
 use rustls::RootCertStore;
+use std::error::Error;
 use std::time::Duration;
 use tokio::net::TcpStream;
 
@@ -364,7 +365,14 @@ pub async fn http_request(
     };
     let res = timeout(Duration::from_secs(5), request_future)
         .await
-        .map_err(|e| anyhow!("Request timeout in 5 seconds, {}", e))??;
+        .map_err(|e| anyhow!("Request timeout in 5 seconds, {}", e))?
+        .map_err(|e| {
+            if let Some(err) = e.source() {
+                anyhow!("{}", err)
+            } else {
+                anyhow!(e)
+            }
+        })?;
     if cli.debug {
         let status = res.status();
         println!("< {:?} {}", res.version(), status);
