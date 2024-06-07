@@ -91,6 +91,10 @@ rcurl -A 'a:b' http://httpbin.org/get
 ```
 rcurl -b 'a:b' http://httpbin.org/get
 ```
+## Upload File
+```
+rcurl --upload-file .gitignore http://httpbin.org/put
+```
 ## Http2
 ### Default
 ```

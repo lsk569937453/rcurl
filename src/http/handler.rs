@@ -222,6 +222,9 @@ pub async fn http_request(
         method = String::from("POST");
         content_type_option = Some(String::from("application/x-www-form-urlencoded"));
     }
+    if cli.uploadfile_option.is_some() {
+        method = String::from("PUT");
+    }
     if let Some(method_userdefined) = cli.method_option.clone() {
         method = method_userdefined;
     }
@@ -287,6 +290,9 @@ pub async fn http_request(
         body_bytes = bytes.into();
     } else if let Some(body) = cli.body_option.clone() {
         body_bytes = Bytes::from(body);
+    } else if let Some(upload_file) = cli.uploadfile_option.clone() {
+        let byte_vec = tokio::fs::read(upload_file).await?;
+        body_bytes = Bytes::from(byte_vec);
     }
 
     if cli.header_option {
