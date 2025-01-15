@@ -2,10 +2,8 @@
 extern crate anyhow;
 #[macro_use]
 extern crate tracing;
-use clap::CommandFactory;
 use clap::Parser;
 use env_logger::Builder;
-use http_body_util::BodyExt;
 
 use http::handler::http_request;
 
@@ -59,12 +57,12 @@ async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
                 RcurlResponse::Http(http_parts)
             }
             "ftp" | "ftps" | "sftp" => {
-                let ftp_res = ftp_request(cli, scheme_str).await?;
-                RcurlResponse::Ftp(ftp_res)
+                ftp_request(cli, scheme_str).await?;
+                RcurlResponse::Ftp(())
             }
             _ => Err(anyhow!("Can not find scheme in the uri:{}.", uri))?,
         };
-        return Ok(s);
+        Ok(s)
     } else {
         Err(anyhow!("Can not find scheme in the uri:{}.", uri))?
     }
@@ -272,7 +270,7 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK);
             let body = response.into_body();
             let s = body.collect().await.unwrap().to_bytes();
-            assert!(s.len() == 0);
+            assert!(s.is_empty());
         } else {
             assert!(false);
         }
