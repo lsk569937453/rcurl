@@ -2,20 +2,18 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 
+use crate::cli::app_config::Cli;
 use async_std::fs::File;
 use async_std::path::Path;
-use env_logger::Builder;
+use async_tls::TlsConnector;
 use futures::io::BufReader;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
-use log::LevelFilter;
-use suppaftp::async_native_tls::TlsConnector;
 use suppaftp::types::FileType;
-use suppaftp::{AsyncNativeTlsConnector, AsyncNativeTlsFtpStream};
+use suppaftp::AsyncRustlsConnector;
+use suppaftp::AsyncRustlsFtpStream;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
-
-use crate::cli::app_config::Cli;
 
 #[derive(Debug)]
 pub struct ProgressBarIter<T> {
@@ -43,14 +41,10 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
     let uri: hyper::Uri = cli.url.parse()?;
     let host = uri.host().ok_or(anyhow!(""))?;
     let port = uri.port_u16().unwrap_or(21);
-    let mut ftp_stream = AsyncNativeTlsFtpStream::connect(format!("{}:{}", host, port)).await?;
+    let mut ftp_stream = AsyncRustlsFtpStream::connect(format!("{}:{}", host, port)).await?;
     if scheme == "ftps" {
-        let ctx = TlsConnector::new()
-            .danger_accept_invalid_certs(true)
-            .danger_accept_invalid_hostnames(true);
-        ftp_stream = ftp_stream
-            .into_secure(AsyncNativeTlsConnector::from(ctx), host)
-            .await?;
+        let ctx = AsyncRustlsConnector::from(TlsConnector::new());
+        ftp_stream = ftp_stream.into_secure(ctx, host).await?;
     };
 
     if let Some(authority) = cli.authority_option.clone() {

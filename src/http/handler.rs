@@ -1,26 +1,20 @@
 use crate::cli::app_config::Cli;
 use bytes::Bytes;
 
-use env_logger::Builder;
 use http::header::ACCEPT;
 use http_body_util::Full;
 use hyper::header::CONTENT_TYPE;
 use hyper::header::COOKIE;
-use hyper::header::HOST;
 use hyper::header::REFERER;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::Request;
-use hyper::Version;
 use hyper_util::rt::TokioExecutor;
-use hyper_util::rt::TokioIo;
 use mime_guess::mime;
 use rustls::RootCertStore;
 use std::error::Error;
 use std::time::Duration;
-use tokio::net::TcpStream;
 
 use tokio::time::timeout;
-use tracing::{Instrument, Level};
 
 use hyper::header::RANGE;
 use std::path::Path;
@@ -29,7 +23,6 @@ use hyper::header::USER_AGENT;
 
 use rustls::client::danger::HandshakeSignatureValid;
 
-use bytes::BytesMut;
 
 use form_data_builder::FormData;
 use http_body_util::BodyStream;
@@ -38,13 +31,11 @@ use hyper::header::CONTENT_LENGTH;
 use hyper::Response;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
-use log::LevelFilter;
 use rustls::crypto::ring::default_provider;
 
 use futures::StreamExt;
 use http_body_util::BodyExt;
 
-use http::response::Parts;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Buf;
 use hyper::HeaderMap;
@@ -63,7 +54,6 @@ use std::io::Write;
 use std::io::Write as WriteStd;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio_rustls::TlsConnector;
 #[derive(Debug)]
 pub struct NoCertificateVerification(CryptoProvider);
 
@@ -246,7 +236,7 @@ pub async fn http_request(
     let user_agent = cli
         .user_agent_option
         .clone()
-        .unwrap_or(format!("rcurl/{}", env!("CARGO_PKG_VERSION").to_string()));
+        .unwrap_or(format!("rcurl/{}", env!("CARGO_PKG_VERSION")));
     header_map.insert(USER_AGENT, HeaderValue::from_str(&user_agent)?);
     if let Some(cookie) = cli.cookie_option.clone() {
         header_map.insert(COOKIE, HeaderValue::from_str(&cookie)?);
@@ -259,7 +249,7 @@ pub async fn http_request(
         header_map.insert(REFERER, HeaderValue::from_str(&refer)?);
     }
     let mut body_bytes = Bytes::new();
-    if cli.form_option.len() != 0 {
+    if !cli.form_option.is_empty() {
         let mut form = FormData::new(Vec::new()); // use a Vec<u8> as a writer
         let form_header = form.content_type_header(); // add this `Content-Type` header to your HTTP request
 
