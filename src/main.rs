@@ -4,7 +4,6 @@ extern crate anyhow;
 extern crate tracing;
 use clap::Parser;
 use env_logger::Builder;
-
 use http::handler::http_request;
 
 use crate::cli::app_config::Cli;
