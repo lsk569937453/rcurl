@@ -164,7 +164,7 @@ rcurl to output it to your terminal anyway, or consider '--output
             let dst = body.copy_to_bytes(content_length as usize);
             let response_string = String::from_utf8_lossy(&dst);
             body_for_test = Full::new(Bytes::from(response_string.clone().to_string())).boxed();
-            println!("{}", response_string);
+            println!("{response_string}");
         }
     }
     let res = Response::from_parts(parts, body_for_test);
@@ -242,7 +242,7 @@ pub async fn http_request(
         header_map.insert(COOKIE, HeaderValue::from_str(&cookie)?);
     }
     if let Some(range) = cli.range_option.clone() {
-        let ranges_format = format!("bytes={}", range);
+        let ranges_format = format!("bytes={range}");
         header_map.insert(RANGE, HeaderValue::from_str(&ranges_format)?);
     }
     if let Some(refer) = cli.refer_option.clone() {
@@ -321,7 +321,7 @@ pub async fn http_request(
         for (key, value) in request.headers().iter() {
             println!("> {}: {}", key, value.to_str()?);
         }
-        println!("> Content-Length: {}", content_length);
+        println!("> Content-Length: {content_length}");
     }
 
     let span = tracing::info_span!("Rcurl");

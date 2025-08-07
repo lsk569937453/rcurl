@@ -41,7 +41,7 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
     let uri: hyper::Uri = cli.url.parse()?;
     let host = uri.host().ok_or(anyhow!(""))?;
     let port = uri.port_u16().unwrap_or(21);
-    let mut ftp_stream = AsyncRustlsFtpStream::connect(format!("{}:{}", host, port)).await?;
+    let mut ftp_stream = AsyncRustlsFtpStream::connect(format!("{host}:{port}")).await?;
     if scheme == "ftps" {
         let ctx = AsyncRustlsConnector::from(TlsConnector::new());
         ftp_stream = ftp_stream.into_secure(ctx, host).await?;
@@ -94,7 +94,7 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
 
 async fn output(cli: Cli, mut item: Vec<u8>) -> Result<(), anyhow::Error> {
     if let Some(mut range) = cli.range_option {
-        range = format!("bytes={}", range);
+        range = format!("bytes={range}");
         let parsed_range = http_range_header::parse_range_header(&range)?;
         let vec_ranges = parsed_range.validate(item.len() as u64)?;
         let mut concatenated_bytes = Vec::new();

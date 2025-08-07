@@ -25,7 +25,7 @@ async fn main() {
     let cli: Cli = Cli::parse();
 
     if let Err(e) = do_request(cli).await {
-        println!("{}", e);
+        println!("{e}");
     }
 }
 
@@ -71,10 +71,10 @@ async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
 mod tests {
     use ::http::StatusCode;
 
+    
     use crate::response::res::RcurlResponse;
     use crate::{cli::app_config::Cli, do_request};
-
-    use super::*;
+    use http_body_util::BodyExt;
 
     #[tokio::test]
     async fn test_http_get_ok() {
