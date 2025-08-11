@@ -16,6 +16,17 @@
 - Byte range support.
 - Verbose mode for debugging.
 
+## Installation on Linux (Quick Start)
+
+For Linux users, the quickest way to get started is by downloading the pre-compiled binary directly from GitHub Releases. This method does not require you to have the Rust toolchain installed.
+
+### Download the Latest Release
+
+```
+curl -L -o rcurl https://github.com/lsk569937453/rcurl/releases/download/v0.0.27/rcurl-x86_64-unknown-linux-gnu
+chmod +x ./rcurl
+```
+
 ## Installation
 
 Ensure you have Rust and Cargo installed. You can install `rcurl` by cloning this repository and building it with Cargo:
