@@ -1,133 +1,109 @@
 # Rcurl
 
-Rcurl is a implementation of the curl library that provides a set of functions for making HTTP(http1.1,http2)/FTP requests.
+![Crates.io Version](https://img.shields.io/crates/v/rcurl.svg)![License](https://img.shields.io/crates/l/rcurl.svg)
 
-You can use it to make HTTP(http1.1,http2)/FTP requests like curl to a server and get the response.
+`rcurl` is a simple, powerful command-line tool for transferring data with URLs, inspired by cURL, and built in Rust.
 
-# Document
+## Features
 
-```
-Usage: rcurl.exe [OPTIONS] <URL>
+- Support for HTTP/1.1, HTTP/2, and HTTP/2 with prior knowledge.
+- Customizable HTTP methods (GET, POST, etc.).
+- Sending custom request body and form data.
+- Custom headers, user-agent, cookies, and referrer.
+- User authentication.
+- Support for PEM certificates and insecure connections.
+- File downloads and uploads.
+- Byte range support.
+- Verbose mode for debugging.
 
-Arguments:
-  <URL>  The request url,like http://www.google.com
+## Installation
 
-Options:
-  -X, --request <method>                                   Specify request method to use
-  -d, --data <data>                                        HTTP POST data
-  -F, --form <name=content>                                Specify multipart MIME data
-  -H, --header <header/@file>                              The http headers
-  -c, --certificate-path-option <CERTIFICATE_PATH_OPTION>  The pem path
-  -u, --user <user:password>                               Server user and password
-  -A, --user-agent <name>                                  Send User-Agent <name> to server
-  -b, --cookie <data|filename>                             The Cookie option
-  -e, --referer <URL>                                      Referrer URL
-  -o, --output <file>                                      Write to file instead of stdout
-  -T, --upload-file <file>                                 Transfer local FILE to destination
-  -Q, --quote <command>                                    Send command(s) to server before transfer
-  -k, --insecure                                           Allow insecure server connections
-  -I, --head                                               Show document info only
-  -r, --range <range>                                      Retrieve only the bytes within RANGE
-  -v, --verbose                                            Make the operation more talkative
-      --http2
-      --http2-prior-knowledge
-  -h, --help                                               Print help
-  -V, --version                                            Print version
+Ensure you have Rust and Cargo installed. You can install `rcurl` by cloning this repository and building it with Cargo:
+
+```bash
+git clone https://github.com/lsk569937453/rcurl.git
+cd rcurl
+cargo install --path .
 ```
 
-# HTTP/HTTPS
+## Usage
 
-## GET
+### Examples
 
-```
-rcurl http://httpbin.org/get
-rcurl https://httpbin.org/get
-```
+**Make a simple GET request:**
 
-## POST with body
-
-```
- rcurl -X POST -d '{"a":1,"b":2}'  http://httpbin.org/post
+```bash
+rcurl http://www.google.com
 ```
 
-## PUT
+**Download a webpage to a file:**
 
-```
- rcurl -X PUT http://httpbin.org/put
-```
-
-## DEBUG
-
-```
-rcurl http://httpbin.org/get -v
+```bash
+rcurl -o google.html http://www.google.com
 ```
 
-## Skip Certificate validate
+**Send POST form data:**
 
-```
-rcurl http://httpbin.org/get -k
-```
-
-## Download file
-
-```
-rcurl -o test.html http://httpbin.org/get
+```bash
+rcurl -X POST -d "param1=value1&param2=value2" http://httpbin.org/post
 ```
 
-## Headers
+**Send JSON data with a custom header:**
 
-```
-rcurl -H 'a:b' -H 'c:d' http://httpbin.org/get
-```
-
-## User Agent
-
-```
-rcurl -A 'a:b' http://httpbin.org/get
+```bash
+rcurl -X POST -d '{"name":"John Doe"}' -H "Content-Type: application/json" http://httpbin.org/post
 ```
 
-## Cookie
+**View only the response headers (HEAD request):**
 
-```
-rcurl -b 'a:b' http://httpbin.org/get
-```
-## Upload File
-```
-rcurl --upload-file .gitignore http://httpbin.org/put
-```
-## Http2
-### Default
-```
- rcurl http://httpbin.org/get  --http2
-```
-### Http2-prior-knowledge
-```
- rcurl https://httpbin.org/get  --http2-prior-knowledge
+```bash
+rcurl -I http://www.google.com
 ```
 
-# FTP/FTPS
+**Use a custom user-agent:**
 
-## List directory
-
-```
- rcurl -u "demo:password" ftp://test.rebex.net:21/
+```bash
+rcurl -A "MyCoolBrowser/1.0" http://httpbin.org/user-agent
 ```
 
-## Upload file
+**Download a specific byte range:**
 
-```
-rcurl -T LICENSE -u "demo:password" ftp://test.rebex.net:21/
+```bash
+rcurl -r 0-1023 http://example.com/file.zip -o partial_file.zip
 ```
 
-# Unit Test Report
+### Options
 
-```
-Coverage Results:
-|| Tested/Total Lines:
-|| src\cli\app_config.rs: 4/4 +0.00%
-|| src\ftp\handler.rs: 38/60 +0.00%
-|| src\http\handler.rs: 149/177 +0.00%
-|| src\main.rs: 11/17 +0.00%
-||
-78.29% coverage, 202/258 lines covered, +0.00% change in coverage
-```
+Below is a complete list of available command-line options:
+
+| Short | Long                        | Argument          | Description                                |
+| :---- | :-------------------------- | :---------------- | :----------------------------------------- | ------------------ |
+|       |                             | `url`             | The request URL (required).                |
+| `-X`  | `--request`                 | `<method>`        | Specify request method to use.             |
+| `-d`  | `--data`                    | `<data>`          | HTTP POST data.                            |
+| `-F`  | `--form`                    | `<name=content>`  | Specify multipart MIME data.               |
+| `-H`  | `--header`                  | `<header/@file>`  | The http headers.                          |
+| `-c`  | `--certificate-path-option` | `<path>`          | The pem path.                              |
+| `-u`  | `--user`                    | `<user:password>` | Server user and password.                  |
+| `-A`  | `--user-agent`              | `<name>`          | Send User-Agent <name> to server.          |
+| `-b`  | `--cookie`                  | `<data            | filename>`                                 | The Cookie option. |
+| `-e`  | `--referer`                 | `<URL>`           | Referrer URL.                              |
+| `-o`  | `--output`                  | `<file>`          | Write to file instead of stdout.           |
+| `-T`  | `--upload-file`             | `<file>`          | Transfer local FILE to destination.        |
+| `-Q`  | `--quote`                   | `<command>`       | Send command(s) to server before transfer. |
+| `-k`  | `--insecure`                |                   | Allow insecure server connections.         |
+| `-I`  | `--head`                    |                   | Show document info only.                   |
+| `-r`  | `--range`                   | `<range>`         | Retrieve only the bytes within RANGE.      |
+| `-v`  | `--verbose`                 |                   | Make the operation more talkative.         |
+|       | `--http2`                   |                   | Use HTTP/2.                                |
+|       | `--http2-prior-knowledge`   |                   | Use HTTP/2 with prior knowledge.           |
+| `-h`  | `--help`                    |                   | Print help information.                    |
+| `-V`  | `--version`                 |                   | Print version information.                 |
+
+## Contributing
+
+Contributions are welcome! Feel free to fork the repository, make your changes, and submit a pull request.
+
+## License
+
+This project is licensed under the [Apache License](LICENSE).
