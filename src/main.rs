@@ -25,7 +25,7 @@ async fn main() {
     let cli: Cli = Cli::parse();
 
     if let Err(e) = do_request(cli).await {
-        println!("{e}");
+        eprintln!("An error occurred:\n{:?}", e);
     }
 }
 
@@ -71,7 +71,6 @@ async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
 mod tests {
     use ::http::StatusCode;
 
-    
     use crate::response::res::RcurlResponse;
     use crate::{cli::app_config::Cli, do_request};
     use http_body_util::BodyExt;

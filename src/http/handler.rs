@@ -1,8 +1,10 @@
 use crate::cli::app_config::Cli;
 use bytes::Bytes;
 
+use anyhow::Context;
 use http::header::ACCEPT;
 use http_body_util::Full;
+
 use hyper::header::CONTENT_TYPE;
 use hyper::header::COOKIE;
 use hyper::header::REFERER;
@@ -359,8 +361,8 @@ pub async fn http_request(
     };
     let res = timeout(Duration::from_secs(5), request_future)
         .await
-        .map_err(|e| anyhow!("Request timeout in 5 seconds, {}", e))?
-        .map_err(|e| anyhow!("Request failed , {}", e))?;
+        .context("Request timed out after 5 seconds")?
+        .context("Failed to execute request")?;
     if cli.debug {
         let status = res.status();
         println!("< {:?} {}", res.version(), status);
