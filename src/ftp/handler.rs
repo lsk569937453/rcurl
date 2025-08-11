@@ -5,10 +5,11 @@ use std::task::Poll;
 use crate::cli::app_config::Cli;
 use async_std::fs::File;
 use async_std::path::Path;
-use async_tls::TlsConnector;
 use futures::io::BufReader;
+use futures_rustls::TlsConnector;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
+use std::sync::Arc;
 use suppaftp::types::FileType;
 use suppaftp::AsyncRustlsConnector;
 use suppaftp::AsyncRustlsFtpStream;
@@ -43,7 +44,13 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
     let port = uri.port_u16().unwrap_or(21);
     let mut ftp_stream = AsyncRustlsFtpStream::connect(format!("{host}:{port}")).await?;
     if scheme == "ftps" {
-        let ctx = AsyncRustlsConnector::from(TlsConnector::new());
+        let root_store = rustls::RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+        };
+        let config = rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        let ctx = AsyncRustlsConnector::from(TlsConnector::from(Arc::new(config)));
         ftp_stream = ftp_stream.into_secure(ctx, host).await?;
     };
 
