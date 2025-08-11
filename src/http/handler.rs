@@ -11,7 +11,6 @@ use hyper::Request;
 use hyper_util::rt::TokioExecutor;
 use mime_guess::mime;
 use rustls::RootCertStore;
-use std::error::Error;
 use std::time::Duration;
 
 use tokio::time::timeout;
@@ -22,7 +21,6 @@ use std::path::Path;
 use hyper::header::USER_AGENT;
 
 use rustls::client::danger::HandshakeSignatureValid;
-
 
 use form_data_builder::FormData;
 use http_body_util::BodyStream;
@@ -362,13 +360,7 @@ pub async fn http_request(
     let res = timeout(Duration::from_secs(5), request_future)
         .await
         .map_err(|e| anyhow!("Request timeout in 5 seconds, {}", e))?
-        .map_err(|e| {
-            if let Some(err) = e.source() {
-                anyhow!("{}", err)
-            } else {
-                anyhow!(e)
-            }
-        })?;
+        .map_err(|e| anyhow!("Request failed , {}", e))?;
     if cli.debug {
         let status = res.status();
         println!("< {:?} {}", res.version(), status);
