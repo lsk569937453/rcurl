@@ -77,7 +77,7 @@ rcurl -r 0-1023 http://example.com/file.zip -o partial_file.zip
 Below is a complete list of available command-line options:
 
 | Short | Long                        | Argument          | Description                                |
-| :---- | :-------------------------- | :---------------- | :----------------------------------------- | ------------------ |
+| :---- | :-------------------------- | :---------------- | :----------------------------------------- |
 |       |                             | `url`             | The request URL (required).                |
 | `-X`  | `--request`                 | `<method>`        | Specify request method to use.             |
 | `-d`  | `--data`                    | `<data>`          | HTTP POST data.                            |
@@ -86,7 +86,7 @@ Below is a complete list of available command-line options:
 | `-c`  | `--certificate-path-option` | `<path>`          | The pem path.                              |
 | `-u`  | `--user`                    | `<user:password>` | Server user and password.                  |
 | `-A`  | `--user-agent`              | `<name>`          | Send User-Agent <name> to server.          |
-| `-b`  | `--cookie`                  | `<data            | filename>`                                 | The Cookie option. |
+| `-b`  | `--cookie`                  | `<data            | filename>`                                 |
 | `-e`  | `--referer`                 | `<URL>`           | Referrer URL.                              |
 | `-o`  | `--output`                  | `<file>`          | Write to file instead of stdout.           |
 | `-T`  | `--upload-file`             | `<file>`          | Transfer local FILE to destination.        |
