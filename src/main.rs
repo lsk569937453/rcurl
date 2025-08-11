@@ -4,7 +4,7 @@ extern crate anyhow;
 extern crate tracing;
 use clap::Parser;
 use env_logger::Builder;
-use http::handler::http_request;
+use http::handler::http_request_with_redirects;
 
 use crate::cli::app_config::Cli;
 use crate::ftp::handler::ftp_request;
@@ -52,7 +52,7 @@ async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
         let scheme_str = scheme_string.as_str();
         let s = match scheme_str {
             "http" | "https" => {
-                let http_parts = http_request(cli, scheme_str).await?;
+                let http_parts = http_request_with_redirects(cli).await?;
                 RcurlResponse::Http(http_parts)
             }
             "ftp" | "ftps" | "sftp" => {

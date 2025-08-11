@@ -1,68 +1,44 @@
 use crate::cli::app_config::Cli;
+use anyhow::{anyhow, Context};
 use bytes::Bytes;
-
-use anyhow::Context;
-use http::header::ACCEPT;
-use http_body_util::Full;
-
-use hyper::header::CONTENT_TYPE;
-use hyper::header::COOKIE;
-use hyper::header::REFERER;
-use hyper::header::{HeaderName, HeaderValue};
-use hyper::Request;
-use hyper_util::rt::TokioExecutor;
-use mime_guess::mime;
-use rustls::RootCertStore;
-use std::time::Duration;
-
-use tokio::time::timeout;
-
-use hyper::header::RANGE;
-use std::path::Path;
-
-use hyper::header::USER_AGENT;
-
-use rustls::client::danger::HandshakeSignatureValid;
-
 use form_data_builder::FormData;
-use http_body_util::BodyStream;
-use hyper::body::Incoming;
-use hyper::header::CONTENT_LENGTH;
-use hyper::Response;
-use indicatif::ProgressBar;
-use indicatif::ProgressStyle;
-use rustls::crypto::ring::default_provider;
-
 use futures::StreamExt;
-use http_body_util::BodyExt;
-
+use http::header::{
+    HeaderName, HeaderValue, ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, USER_AGENT,
+};
 use http_body_util::combinators::BoxBody;
-use hyper::body::Buf;
-use hyper::HeaderMap;
+use http_body_util::{BodyExt, BodyStream, Full};
+use hyper::body::{Body, Incoming};
+use hyper::{Request, Response, Uri};
 use hyper_util::client::legacy::Client;
-use rustls::crypto::ring::DEFAULT_CIPHER_SUITES;
-use rustls::crypto::CryptoProvider;
-use rustls::crypto::{verify_tls12_signature, verify_tls13_signature};
-use rustls::pki_types::ServerName;
-use rustls::pki_types::{CertificateDer, UnixTime};
-use rustls::{ClientConfig, DigitallySignedStruct};
+use hyper_util::rt::TokioExecutor;
+use indicatif::{ProgressBar, ProgressStyle};
+use mime_guess::mime;
+use rustls::client::danger::HandshakeSignatureValid;
+use rustls::crypto::ring::{default_provider, DEFAULT_CIPHER_SUITES};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore};
 use std::cmp::min;
-use std::convert::From;
 use std::convert::Infallible;
 use std::fs::OpenOptions;
-use std::io::Write;
 use std::io::Write as WriteStd;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::timeout;
+use url::Url;
+
+const MAX_REDIRECTS: u8 = 10;
+
 #[derive(Debug)]
-pub struct NoCertificateVerification(CryptoProvider);
+pub struct NoCertificateVerification(rustls::crypto::CryptoProvider);
 
 impl NoCertificateVerification {
-    pub fn new(provider: CryptoProvider) -> Self {
+    pub fn new(provider: rustls::crypto::CryptoProvider) -> Self {
         Self(provider)
     }
 }
-
 impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
     fn verify_server_cert(
         &self,
@@ -81,7 +57,7 @@ impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(
+        rustls::crypto::verify_tls12_signature(
             message,
             cert,
             dss,
@@ -95,7 +71,7 @@ impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(
+        rustls::crypto::verify_tls13_signature(
             message,
             cert,
             dss,
@@ -108,103 +84,46 @@ impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
     }
 }
 
-pub async fn handle_response(
-    cli: &Cli,
-    res: Response<Incoming>,
-) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
-    if cli.header_option {
-        println!("{:?} {}", res.version(), res.status());
-        for (key, value) in res.headers().iter() {
-            println!("{}: {}", key, value.to_str()?);
-        }
-        let t = res
-            .map(|b| b.boxed())
-            .map(|item| item.map_err(|_| -> Infallible { unreachable!() }).boxed());
-        return Ok(t);
-    }
-    let (parts, incoming) = res.into_parts();
-    let mut body_for_test = Full::new(Bytes::from("")).boxed();
-
-    let content_length_option = parts.headers.get(CONTENT_LENGTH);
-
-    if let Some(content_lenth_str) = content_length_option {
-        let content_length = content_lenth_str.to_str()?.parse::<u64>()?;
-
-        if let Some(file_path) = cli.file_path_option.clone() {
-            let mut body_streaming = BodyStream::new(incoming);
-            let mut downloaded = 0;
-            let total_size = content_length;
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(file_path)?;
-            let pb = ProgressBar::new(total_size);
-            pb.set_style(ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-        ?
-        .progress_chars("#>-"));
-
-            while let Some(Ok(t)) = body_streaming.next().await {
-                if let Ok(bytes) = t.into_data() {
-                    let new = min(downloaded + bytes.len() as u64, total_size);
-                    downloaded = new;
-                    pb.set_position(new);
-                    file.write_all(&bytes)?;
-                }
-            }
-            pb.finish_with_message("downloaded");
-        } else {
-            if content_length > 1024 * 1024 * 100 {
-                return Err(anyhow!(
-                    "Binary output can mess up your terminal. Use '--output -' to tell
-rcurl to output it to your terminal anyway, or consider '--output
-<FILE>' to save to a file."
-                ));
-            }
-            let mut body = incoming.collect().await?.aggregate();
-            let dst = body.copy_to_bytes(content_length as usize);
-            let response_string = String::from_utf8_lossy(&dst);
-            body_for_test = Full::new(Bytes::from(response_string.clone().to_string())).boxed();
-            println!("{response_string}");
-        }
-    }
-    let res = Response::from_parts(parts, body_for_test);
-    Ok(res)
-}
-pub async fn http_request(
+pub async fn http_request_with_redirects(
     cli: Cli,
-    scheme: &str,
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
-    let mut root_store = RootCertStore::empty();
+    let mut current_url: Url = cli.url.parse().context("Failed to parse initial URL")?;
 
-    if let Some(file_path) = cli.certificate_path_option.clone() {
-        let f = std::fs::File::open(file_path.clone())?;
-        let mut rd = std::io::BufReader::new(f);
-        for cert in rustls_pemfile::certs(&mut rd) {
-            root_store.add(cert?)?;
+    for i in 0..MAX_REDIRECTS {
+        let uri: Uri = current_url.to_string().parse()?;
+        let scheme = uri.scheme_str().unwrap_or("http");
+
+        let request = build_request(&cli, &uri)?;
+
+        let res = send_request(&cli, request, scheme).await?;
+
+        let status = res.status();
+        if status.is_redirection() {
+            if let Some(location_header) = res.headers().get(http::header::LOCATION) {
+                let location_str = location_header.to_str()?;
+                current_url = current_url.join(location_str)?;
+
+                if cli.debug {
+                    println!(
+                        "\nRedirecting to: {current_url} ({}/{MAX_REDIRECTS})\n",
+                        i + 1
+                    );
+                }
+                continue;
+            } else {
+                return Err(anyhow!("Redirect response missing 'location' header"));
+            }
         }
-    } else {
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    };
-    let versions = rustls::DEFAULT_VERSIONS.to_vec();
-    let mut tls_config = ClientConfig::builder_with_provider(
-        CryptoProvider {
-            cipher_suites: DEFAULT_CIPHER_SUITES.to_vec(),
-            ..default_provider()
-        }
-        .into(),
-    )
-    .with_protocol_versions(&versions)?
-    .with_root_certificates(root_store)
-    .with_no_client_auth();
 
-    tls_config.key_log = Arc::new(rustls::KeyLogFile::new());
+        return handle_response(&cli, res).await;
+    }
 
-    if cli.skip_certificate_validate {
-        tls_config
-            .dangerous()
-            .set_certificate_verifier(Arc::new(NoCertificateVerification::new(default_provider())));
-    };
-    let uri: hyper::Uri = cli.url.parse()?;
+    Err(anyhow!(
+        "Exceeded maximum number of redirects ({MAX_REDIRECTS})"
+    ))
+}
+
+fn build_request(cli: &Cli, uri: &Uri) -> Result<Request<Full<Bytes>>, anyhow::Error> {
     let mut method = String::from("GET");
     let mut content_type_option = None;
 
@@ -215,44 +134,39 @@ pub async fn http_request(
     if cli.uploadfile_option.is_some() {
         method = String::from("PUT");
     }
-    if let Some(method_userdefined) = cli.method_option.clone() {
-        method = method_userdefined;
+    if let Some(method_userdefined) = cli.method_option.as_ref() {
+        method = method_userdefined.clone();
     }
-    let mut request_builder = Request::builder()
-        .method(method.as_str())
-        .uri(cli.url.clone());
+    if !cli.form_option.is_empty() {
+        method = String::from("POST");
+    }
+    if cli.header_option {
+        method = String::from("HEAD");
+    }
+
+    let mut request_builder = Request::builder().method(method.as_str()).uri(uri.clone());
     if cli.http2_prior_knowledge {
         request_builder = request_builder.version(hyper::Version::HTTP_2);
     }
-    let mut header_map = HeaderMap::new();
+
+    let mut header_map = http::HeaderMap::new();
     if let Some(content_type) = content_type_option {
         header_map.insert(CONTENT_TYPE, HeaderValue::from_str(&content_type)?);
     }
     header_map.insert(ACCEPT, HeaderValue::from_str("*/*")?);
-    // header_map.insert(
-    //     HOST,
-    //     HeaderValue::from_str(uri.host().ok_or(anyhow!("no host"))?)?,
-    // );
     let user_agent = cli
         .user_agent_option
-        .clone()
-        .unwrap_or(format!("rcurl/{}", env!("CARGO_PKG_VERSION")));
-    header_map.insert(USER_AGENT, HeaderValue::from_str(&user_agent)?);
-    if let Some(cookie) = cli.cookie_option.clone() {
-        header_map.insert(COOKIE, HeaderValue::from_str(&cookie)?);
+        .as_deref()
+        .unwrap_or(concat!("rcurl/", env!("CARGO_PKG_VERSION")));
+    header_map.insert(USER_AGENT, HeaderValue::from_str(user_agent)?);
+    if let Some(cookie) = cli.cookie_option.as_ref() {
+        header_map.insert(COOKIE, HeaderValue::from_str(cookie)?);
     }
-    if let Some(range) = cli.range_option.clone() {
-        let ranges_format = format!("bytes={range}");
-        header_map.insert(RANGE, HeaderValue::from_str(&ranges_format)?);
-    }
-    if let Some(refer) = cli.refer_option.clone() {
-        header_map.insert(REFERER, HeaderValue::from_str(&refer)?);
-    }
+
     let mut body_bytes = Bytes::new();
     if !cli.form_option.is_empty() {
-        let mut form = FormData::new(Vec::new()); // use a Vec<u8> as a writer
-        let form_header = form.content_type_header(); // add this `Content-Type` header to your HTTP request
-
+        let mut form = FormData::new(Vec::new());
+        let form_header = form.content_type_header();
         request_builder =
             request_builder.header(CONTENT_TYPE, HeaderValue::from_str(form_header.as_str())?);
         request_builder = request_builder.method("POST");
@@ -278,38 +192,30 @@ pub async fn http_request(
         }
         let bytes = form.finish()?;
         body_bytes = bytes.into();
-    } else if let Some(body) = cli.body_option.clone() {
-        body_bytes = Bytes::from(body);
-    } else if let Some(upload_file) = cli.uploadfile_option.clone() {
-        let byte_vec = tokio::fs::read(upload_file).await?;
+    } else if let Some(body) = cli.body_option.as_ref() {
+        body_bytes = Bytes::from(body.clone());
+    } else if let Some(upload_file) = cli.uploadfile_option.as_ref() {
+        let byte_vec = std::fs::read(upload_file)?;
         body_bytes = Bytes::from(byte_vec);
     }
 
-    if cli.header_option {
-        request_builder = request_builder.method("HEAD");
-    }
-    for x in cli.headers.clone() {
-        let split: Vec<String> = x.splitn(2, ':').map(|s| s.to_string()).collect();
-
+    for x in &cli.headers {
+        let split: Vec<&str> = x.splitn(2, ':').collect();
         if split.len() == 2 {
-            let key = &split[0];
-            let value = &split[1];
-            let new_value = value.trim_start();
-
             header_map.insert(
-                HeaderName::from_str(key.as_str())?,
-                HeaderValue::from_str(new_value)?,
+                HeaderName::from_str(split[0])?,
+                HeaderValue::from_str(split[1].trim_start())?,
             );
         } else {
-            return Err(anyhow!("header error"));
+            return Err(anyhow!("header error: '{}'", x));
         }
     }
+
     for (key, val) in header_map {
-        request_builder = request_builder.header(key.ok_or(anyhow!(""))?, val);
+        request_builder = request_builder.header(key.unwrap(), val);
     }
-    let content_length = body_bytes.len();
-    let body = Full::new(body_bytes);
-    let request = request_builder.body(body)?;
+
+    let request = request_builder.body(Full::new(body_bytes))?;
 
     if cli.debug {
         println!(
@@ -321,57 +227,180 @@ pub async fn http_request(
         for (key, value) in request.headers().iter() {
             println!("> {}: {}", key, value.to_str()?);
         }
-        println!("> Content-Length: {content_length}");
+        println!(
+            "> Content-Length: {}",
+            request.body().size_hint().exact().unwrap_or(0)
+        );
+        println!(">");
     }
 
-    let span = tracing::info_span!("Rcurl");
-    let _enter = span.enter();
-    let request_future = {
-        trace!("Start request");
-        let fut = if scheme == "https" {
-            let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
-                .with_tls_config(tls_config)
-                .https_only();
-            let https_connector = if cli.http2 {
-                connector_builder.enable_all_versions().build()
-            } else if cli.http2_prior_knowledge {
-                connector_builder.enable_http2().build()
-            } else {
-                connector_builder.enable_http1().build()
-            };
+    Ok(request)
+}
 
-            let https_clientt: Client<_, Full<Bytes>> =
-                Client::builder(TokioExecutor::new()).build(https_connector);
-            https_clientt.request(request)
+async fn send_request(
+    cli: &Cli,
+    request: Request<Full<Bytes>>,
+    scheme: &str,
+) -> Result<Response<Incoming>, anyhow::Error> {
+    let request_future = if scheme == "https" {
+        // TLS 配置逻辑
+        let mut root_store = RootCertStore::empty();
+        if let Some(file_path) = cli.certificate_path_option.as_ref() {
+            let f = std::fs::File::open(file_path)?;
+            let mut rd = std::io::BufReader::new(f);
+            for cert in rustls_pemfile::certs(&mut rd) {
+                root_store.add(cert?)?;
+            }
         } else {
-            let mut http_client_builder = Client::builder(TokioExecutor::new());
-            http_client_builder
-                .http1_title_case_headers(true)
-                .http1_preserve_header_case(true);
-            let https_connector = if cli.http2 {
-                http_client_builder.http2_only(false).build_http()
-            } else if cli.http2_prior_knowledge {
-                http_client_builder.http2_only(true).build_http()
-            } else {
-                http_client_builder.build_http()
-            };
-            https_connector.request(request)
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         };
-        fut
+
+        let mut tls_config = ClientConfig::builder_with_provider(
+            rustls::crypto::CryptoProvider {
+                cipher_suites: DEFAULT_CIPHER_SUITES.to_vec(),
+                ..default_provider()
+            }
+            .into(),
+        )
+        .with_protocol_versions(rustls::DEFAULT_VERSIONS)?
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+        if cli.skip_certificate_validate {
+            tls_config.dangerous().set_certificate_verifier(Arc::new(
+                NoCertificateVerification::new(default_provider()),
+            ));
+        };
+
+        let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_only();
+
+        let https_connector = if cli.http2 {
+            connector_builder.enable_all_versions().build()
+        } else if cli.http2_prior_knowledge {
+            connector_builder.enable_http2().build()
+        } else {
+            connector_builder.enable_http1().build()
+        };
+
+        let https_client: Client<_, Full<Bytes>> =
+            Client::builder(TokioExecutor::new()).build(https_connector);
+        https_client.request(request)
+    } else {
+        let http_client: Client<_, Full<Bytes>> =
+            Client::builder(TokioExecutor::new()).build_http();
+        http_client.request(request)
     };
-    let res = timeout(Duration::from_secs(5), request_future)
+
+    let res = timeout(Duration::from_secs(30), request_future) // 增加超时时间
         .await
-        .context("Request timed out after 5 seconds")?
+        .context("Request timed out after 30 seconds")?
         .context("Failed to execute request")?;
+
     if cli.debug {
-        let status = res.status();
-        println!("< {:?} {}", res.version(), status);
+        println!("< {:?} {}", res.version(), res.status());
         for (key, value) in res.headers().iter() {
             println!("< {}: {}", key, value.to_str()?);
         }
+        println!("<");
     }
 
-    let parts = handle_response(&cli, res).await?;
+    Ok(res)
+}
 
-    Ok(parts)
+async fn download_file_with_progress(
+    file_path: &str,
+    total_size: u64,
+    mut body_stream: BodyStream<Incoming>,
+) -> Result<(), anyhow::Error> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(file_path)
+        .context(format!("Failed to open or create file: {}", file_path))?;
+
+    let pb = ProgressBar::new(total_size);
+    pb.set_style(
+        ProgressStyle::with_template(
+            "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+        )?
+        .progress_chars("#>-"),
+    );
+
+    let mut downloaded = 0;
+    while let Some(chunk_result) = body_stream.next().await {
+        let bytes = chunk_result
+            .context("Error while downloading file stream")?
+            .into_data()
+            .map_err(|e| anyhow!("Error while downloading file stream"))?;
+
+        file.write_all(&bytes)
+            .context("Error writing chunk to file")?;
+        let new = min(downloaded + bytes.len() as u64, total_size);
+        downloaded = new;
+        pb.set_position(new);
+    }
+
+    pb.finish_with_message("Download complete");
+    Ok(())
+}
+
+pub async fn handle_response(
+    cli: &Cli,
+    res: Response<Incoming>,
+) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
+    if cli.header_option {
+        println!("{:?} {}", res.version(), res.status());
+        for (key, value) in res.headers().iter() {
+            println!("{}: {}", key, value.to_str()?);
+        }
+        let t = res
+            .map(|b| b.boxed())
+            .map(|item| item.map_err(|_| -> Infallible { unreachable!() }).boxed());
+        return Ok(t);
+    }
+
+    let (parts, incoming) = res.into_parts();
+
+    if let Some(file_path) = cli.file_path_option.as_ref() {
+        let content_length = parts
+            .headers
+            .get(CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+
+        download_file_with_progress(file_path, content_length, BodyStream::new(incoming)).await?;
+
+        let empty_body = Full::new(Bytes::new()).boxed();
+        let response = Response::from_parts(parts, empty_body);
+        Ok(response)
+    } else {
+        let content_length = parts
+            .headers
+            .get(CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
+
+        let body_bytes = incoming.collect().await?.to_bytes();
+
+        if let Some(length) = content_length {
+            if length > 1024 * 1024 * 100 {
+                return Err(anyhow!("Binary output can mess up your terminal..."));
+            }
+        }
+
+        match String::from_utf8(body_bytes.to_vec()) {
+            Ok(text) => print!("{text}"),
+            Err(_) => {
+                println!("[rcurl: warning] response body is not valid UTF-8 and was not written to a file.");
+                println!("[rcurl: warning] to save to a file, use `-o <filename>`");
+            }
+        }
+        std::io::stdout().flush()?; // 确保内容立即打印
+
+        let response = Response::from_parts(parts, Full::new(body_bytes).boxed());
+        Ok(response)
+    }
 }
