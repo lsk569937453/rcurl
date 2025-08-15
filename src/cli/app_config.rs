@@ -59,9 +59,11 @@ pub struct Cli {
     /// Retrieve only the bytes within RANGE
     #[arg(short = 'r', long = "range", value_name = "range")]
     pub range_option: Option<String>,
-    ///  Make the operation more talkative
-    #[arg(short = 'v', long = "verbose")]
-    pub debug: bool,
+    /// 设置日志级别：
+    /// -v   (debug)
+    /// -vv  (trace)
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+    pub verbosity: u8,
     #[arg(long = "http2")]
     pub http2: bool,
     #[arg(long = "http2-prior-knowledge")]
@@ -95,7 +97,7 @@ impl Cli {
             range_option: None,
             http2: false,
             http2_prior_knowledge: false,
-            debug: false,
+            verbosity: 0,
             // help: false,
             // help_all: false,
         }

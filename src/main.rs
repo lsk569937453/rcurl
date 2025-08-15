@@ -2,17 +2,15 @@
 extern crate anyhow;
 #[macro_use]
 extern crate tracing;
-use clap::Parser;
-use env_logger::Builder;
-use http::handler::http_request_with_redirects;
-
 use crate::cli::app_config::Cli;
 use crate::ftp::handler::ftp_request;
 use crate::response::res::RcurlResponse;
-use log::LevelFilter;
+use clap::Parser;
+use http::handler::http_request_with_redirects;
 use tracing::Level;
-
+use tracing_subscriber::fmt::format::FmtSpan;
 mod ftp;
+mod tls;
 
 mod http;
 
@@ -25,26 +23,27 @@ async fn main() {
     let cli: Cli = Cli::parse();
 
     if let Err(e) = do_request(cli).await {
-        eprintln!("An error occurred:\n{:?}", e);
+        error!("An error occurred:\n{:?}", e);
     }
 }
 
 async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
-    let log_level_hyper = if cli.debug { Level::TRACE } else { Level::INFO };
+    let log_level = match cli.verbosity {
+        0 => Level::INFO,
+        1 => Level::DEBUG,
+        _ => Level::TRACE,
+    };
 
     let subscriber = tracing_subscriber::fmt()
         .with_level(true)
-        .with_max_level(log_level_hyper)
+        .without_time() // 2. 去掉时间戳
+        .with_level(false) // 3. 去掉日志级别指示 (e.g., "INFO", "DEBUG")
+        .with_target(false) // 4. 去掉模块路径
+        .with_span_events(FmtSpan::NONE) //
+        .with_max_level(log_level)
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
-    let log_level_hyper = if cli.debug {
-        LevelFilter::Trace
-    } else {
-        LevelFilter::Info
-    };
 
-    // init logger
-    let _ = Builder::new().filter_level(log_level_hyper).try_init();
     let url = cli.url.clone();
     let uri: hyper::Uri = url.parse()?;
     if let Some(scheme) = uri.scheme() {
@@ -107,7 +106,7 @@ mod tests {
     async fn test_http_get_debug_ok() {
         let mut cli = Cli::new();
         cli.url = "https://httpbin.org/get".to_string();
-        cli.debug = true;
+        cli.verbosity = 0;
         cli.skip_certificate_validate = true;
         let result = do_request(cli).await;
         assert!(result.is_ok());

@@ -1,4 +1,5 @@
 use crate::cli::app_config::Cli;
+use crate::tls::rcurl_cert_verifier::RcurlCertVerifier;
 use anyhow::{anyhow, Context};
 use bytes::Bytes;
 use form_data_builder::FormData;
@@ -14,10 +15,8 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use indicatif::{ProgressBar, ProgressStyle};
 use mime_guess::mime;
-use rustls::client::danger::HandshakeSignatureValid;
 use rustls::crypto::ring::{default_provider, DEFAULT_CIPHER_SUITES};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore};
+use rustls::{ClientConfig, RootCertStore};
 use std::cmp::min;
 use std::convert::Infallible;
 use std::fs::OpenOptions;
@@ -30,59 +29,6 @@ use tokio::time::timeout;
 use url::Url;
 
 const MAX_REDIRECTS: u8 = 10;
-
-#[derive(Debug)]
-pub struct NoCertificateVerification(rustls::crypto::CryptoProvider);
-
-impl NoCertificateVerification {
-    pub fn new(provider: rustls::crypto::CryptoProvider) -> Self {
-        Self(provider)
-    }
-}
-impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp: &[u8],
-        _now: UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
 
 pub async fn http_request_with_redirects(
     cli: Cli,
@@ -103,8 +49,8 @@ pub async fn http_request_with_redirects(
                 let location_str = location_header.to_str()?;
                 current_url = current_url.join(location_str)?;
 
-                if cli.debug {
-                    println!(
+                if cli.verbosity >= 1 {
+                    debug!(
                         "\nRedirecting to: {current_url} ({}/{MAX_REDIRECTS})\n",
                         i + 1
                     );
@@ -217,21 +163,21 @@ fn build_request(cli: &Cli, uri: &Uri) -> Result<Request<Full<Bytes>>, anyhow::E
 
     let request = request_builder.body(Full::new(body_bytes))?;
 
-    if cli.debug {
-        println!(
+    if cli.verbosity >= 1 {
+        debug!(
             "> {} {} {:?}",
             request.method(),
             request.uri().path(),
             request.version()
         );
         for (key, value) in request.headers().iter() {
-            println!("> {}: {}", key, value.to_str()?);
+            debug!("> {}: {}", key, value.to_str()?);
         }
-        println!(
+        debug!(
             "> Content-Length: {}",
             request.body().size_hint().exact().unwrap_or(0)
         );
-        println!(">");
+        debug!(">");
     }
 
     Ok(request)
@@ -255,7 +201,7 @@ async fn send_request(
             root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         };
 
-        let mut tls_config = ClientConfig::builder_with_provider(
+        let tls_config = ClientConfig::builder_with_provider(
             rustls::crypto::CryptoProvider {
                 cipher_suites: DEFAULT_CIPHER_SUITES.to_vec(),
                 ..default_provider()
@@ -263,14 +209,29 @@ async fn send_request(
             .into(),
         )
         .with_protocol_versions(rustls::DEFAULT_VERSIONS)?
-        .with_root_certificates(root_store)
+        .with_root_certificates(root_store.clone())
         .with_no_client_auth();
 
-        if cli.skip_certificate_validate {
-            tls_config.dangerous().set_certificate_verifier(Arc::new(
-                NoCertificateVerification::new(default_provider()),
-            ));
-        };
+        let provider = Arc::new(rustls::crypto::CryptoProvider {
+            cipher_suites: DEFAULT_CIPHER_SUITES.to_vec(),
+            ..default_provider()
+        });
+
+        let rcurl_verifier = RcurlCertVerifier::new(
+            cli.verbosity,
+            cli.skip_certificate_validate,
+            provider.clone(),
+            &root_store,
+        );
+
+        let mut tls_config = ClientConfig::builder_with_provider(provider)
+            .with_protocol_versions(rustls::DEFAULT_VERSIONS)?
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+
+        tls_config
+            .dangerous()
+            .set_certificate_verifier(Arc::new(rcurl_verifier));
 
         let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
@@ -298,12 +259,12 @@ async fn send_request(
         .context("Request timed out after 30 seconds")?
         .context("Failed to execute request")?;
 
-    if cli.debug {
-        println!("< {:?} {}", res.version(), res.status());
+    if cli.verbosity >= 1 {
+        debug!("< {:?} {}", res.version(), res.status());
         for (key, value) in res.headers().iter() {
-            println!("< {}: {}", key, value.to_str()?);
+            debug!("< {}: {}", key, value.to_str()?);
         }
-        println!("<");
+        debug!("<");
     }
 
     Ok(res)
@@ -351,9 +312,9 @@ pub async fn handle_response(
     res: Response<Incoming>,
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
     if cli.header_option {
-        println!("{:?} {}", res.version(), res.status());
+        info!("{:?} {}", res.version(), res.status());
         for (key, value) in res.headers().iter() {
-            println!("{}: {}", key, value.to_str()?);
+            info!("{}: {}", key, value.to_str()?);
         }
         let t = res
             .map(|b| b.boxed())
@@ -394,8 +355,8 @@ pub async fn handle_response(
         match String::from_utf8(body_bytes.to_vec()) {
             Ok(text) => print!("{text}"),
             Err(_) => {
-                println!("[rcurl: warning] response body is not valid UTF-8 and was not written to a file.");
-                println!("[rcurl: warning] to save to a file, use `-o <filename>`");
+                error!("[rcurl: warning] response body is not valid UTF-8 and was not written to a file.");
+                error!("[rcurl: warning] to save to a file, use `-o <filename>`");
             }
         }
         std::io::stdout().flush()?; // 确保内容立即打印
