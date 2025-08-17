@@ -36,10 +36,10 @@ async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
 
     let subscriber = tracing_subscriber::fmt()
         .with_level(true)
-        .without_time() // 2. 去掉时间戳
-        .with_level(false) // 3. 去掉日志级别指示 (e.g., "INFO", "DEBUG")
-        .with_target(false) // 4. 去掉模块路径
-        .with_span_events(FmtSpan::NONE) //
+        .without_time()
+        .with_level(false)
+        .with_target(false)
+        .with_span_events(FmtSpan::NONE)
         .with_max_level(log_level)
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);

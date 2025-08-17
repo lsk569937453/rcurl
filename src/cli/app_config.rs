@@ -2,7 +2,6 @@ use clap::Parser;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about, arg_required_else_help = true)]
-// #[clap(disable_help_flag = true)]
 pub struct Cli {
     /// The request url,like http://www.google.com
     pub url: String,
@@ -68,12 +67,6 @@ pub struct Cli {
     pub http2: bool,
     #[arg(long = "http2-prior-knowledge")]
     pub http2_prior_knowledge: bool,
-    // /// Print help
-    // #[arg(short, long, action = clap::ArgAction::Help)]
-    // pub help: bool,
-    // /// Print help, including uncommon options
-    // #[arg(long, action = clap::ArgAction::Help)]
-    // pub help_all: bool,
 }
 
 impl Cli {
@@ -98,8 +91,6 @@ impl Cli {
             http2: false,
             http2_prior_knowledge: false,
             verbosity: 0,
-            // help: false,
-            // help_all: false,
         }
     }
 }

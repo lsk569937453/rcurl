@@ -189,7 +189,6 @@ async fn send_request(
     scheme: &str,
 ) -> Result<Response<Incoming>, anyhow::Error> {
     let request_future = if scheme == "https" {
-        // TLS 配置逻辑
         let mut root_store = RootCertStore::empty();
         if let Some(file_path) = cli.certificate_path_option.as_ref() {
             let f = std::fs::File::open(file_path)?;
@@ -200,17 +199,6 @@ async fn send_request(
         } else {
             root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         };
-
-        let tls_config = ClientConfig::builder_with_provider(
-            rustls::crypto::CryptoProvider {
-                cipher_suites: DEFAULT_CIPHER_SUITES.to_vec(),
-                ..default_provider()
-            }
-            .into(),
-        )
-        .with_protocol_versions(rustls::DEFAULT_VERSIONS)?
-        .with_root_certificates(root_store.clone())
-        .with_no_client_auth();
 
         let provider = Arc::new(rustls::crypto::CryptoProvider {
             cipher_suites: DEFAULT_CIPHER_SUITES.to_vec(),

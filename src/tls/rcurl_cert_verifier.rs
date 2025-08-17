@@ -11,7 +11,6 @@ use std::sync::Arc;
 use x509_parser::parse_x509_certificate;
 #[derive(Debug)]
 pub struct RcurlCertVerifier {
-    // 我们将组合一个标准的 WebPKI 验证器，以便在需要时进行真正的验证
     verifier: Arc<dyn ServerCertVerifier>,
     verbosity: u8,
     skip_validate: bool,

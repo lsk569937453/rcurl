@@ -30,7 +30,6 @@ impl<T: Read> Read for ProgressBarIter<T> {
             self.progress.inc(bytes_read as u64);
         }
 
-        // 返回从内部读取器得到的原始结果
         Ok(bytes_read)
     }
 }
