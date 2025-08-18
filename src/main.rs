@@ -11,7 +11,7 @@ use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
 mod ftp;
 mod tls;
-
+use tracing_subscriber::EnvFilter;
 mod http;
 
 mod cli;
@@ -33,7 +33,10 @@ async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
         1 => Level::DEBUG,
         _ => Level::TRACE,
     };
-
+    let filter = EnvFilter::builder()
+        .with_default_directive(log_level.into())
+        .from_env_lossy()
+        .add_directive("hyper_util=off".parse()?);
     let subscriber = tracing_subscriber::fmt()
         .with_level(true)
         .without_time()
@@ -41,6 +44,7 @@ async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
         .with_target(false)
         .with_span_events(FmtSpan::NONE)
         .with_max_level(log_level)
+        .with_env_filter(filter)
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
 

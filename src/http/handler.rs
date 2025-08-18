@@ -21,6 +21,7 @@ use std::cmp::min;
 use std::convert::Infallible;
 use std::fs::OpenOptions;
 use std::io::Write as WriteStd;
+use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -68,8 +69,40 @@ pub async fn http_request_with_redirects(
         "Exceeded maximum number of redirects ({MAX_REDIRECTS})"
     ))
 }
+fn parse_host(uri: &Uri) {
+    if let Some(host) = uri.host() {
+        let scheme = uri.scheme_str().unwrap_or("http");
 
+        let port = uri
+            .port_u16()
+            .unwrap_or_else(|| if scheme == "https" { 443 } else { 80 });
+
+        let host_and_port = format!("{}:{}", host, port);
+        debug!("Resolving DNS for: {}", host_and_port);
+
+        match host_and_port.to_socket_addrs() {
+            Ok(mut addrs) => {
+                if let Some(addr) = addrs.next() {
+                    debug!("Resolved IP: {}", addr.ip());
+                    for addr in addrs {
+                        debug!("Resolved IP (alternative): {}", addr.ip());
+                    }
+                } else {
+                    error!("DNS resolution for {} returned no addresses.", host);
+                }
+            }
+            Err(e) => {
+                error!("DNS resolution failed for {}: {}", host, e);
+            }
+        }
+    } else {
+        error!("Could not parse host from the URI: {}", uri);
+    }
+}
 fn build_request(cli: &Cli, uri: &Uri) -> Result<Request<Full<Bytes>>, anyhow::Error> {
+    if cli.verbosity >= 1 {
+        parse_host(uri);
+    }
     let mut method = String::from("GET");
     let mut content_type_option = None;
 
