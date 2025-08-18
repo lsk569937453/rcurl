@@ -1,4 +1,5 @@
 use crate::cli::app_config::Cli;
+use crate::http::dns_logging_connector::DnsLoggingResolver;
 use crate::tls::rcurl_cert_verifier::RcurlCertVerifier;
 use anyhow::{anyhow, Context};
 use bytes::Bytes;
@@ -11,6 +12,7 @@ use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, BodyStream, Full};
 use hyper::body::{Body, Incoming};
 use hyper::{Request, Response, Uri};
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -100,9 +102,6 @@ fn parse_host(uri: &Uri) {
     }
 }
 fn build_request(cli: &Cli, uri: &Uri) -> Result<Request<Full<Bytes>>, anyhow::Error> {
-    if cli.verbosity >= 1 {
-        parse_host(uri);
-    }
     let mut method = String::from("GET");
     let mut content_type_option = None;
 
@@ -270,8 +269,11 @@ async fn send_request(
             Client::builder(TokioExecutor::new()).build(https_connector);
         https_client.request(request)
     } else {
+        let resolver = DnsLoggingResolver::new();
+
+        let connector = HttpConnector::new_with_resolver(resolver);
         let http_client: Client<_, Full<Bytes>> =
-            Client::builder(TokioExecutor::new()).build_http();
+            Client::builder(TokioExecutor::new()).build(connector);
         http_client.request(request)
     };
 
