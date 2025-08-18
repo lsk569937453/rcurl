@@ -121,6 +121,7 @@ async fn output(cli: Cli, mut item: Vec<u8>) -> Result<(), anyhow::Error> {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(file_path)
             .await?;
         let _ = file.write_all(item.as_slice()).await;

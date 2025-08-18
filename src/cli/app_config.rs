@@ -1,6 +1,6 @@
 use clap::Parser;
 
-#[derive(Parser)]
+#[derive(Parser, Default)]
 #[command(author, version, about, long_about, arg_required_else_help = true)]
 pub struct Cli {
     /// The request url,like http://www.google.com
@@ -67,30 +67,4 @@ pub struct Cli {
     pub http2: bool,
     #[arg(long = "http2-prior-knowledge")]
     pub http2_prior_knowledge: bool,
-}
-
-impl Cli {
-    pub fn new() -> Self {
-        Cli {
-            url: String::new(),
-            method_option: None,
-            body_option: None,
-            form_option: Vec::new(),
-            headers: Vec::new(),
-            certificate_path_option: None,
-            authority_option: None,
-            user_agent_option: None,
-            cookie_option: None,
-            refer_option: None,
-            file_path_option: None,
-            uploadfile_option: None,
-            quote_option: None,
-            skip_certificate_validate: false,
-            header_option: false,
-            range_option: None,
-            http2: false,
-            http2_prior_knowledge: false,
-            verbosity: 0,
-        }
-    }
 }

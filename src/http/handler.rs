@@ -266,6 +266,7 @@ async fn download_file_with_progress(
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open(file_path)
         .context(format!("Failed to open or create file: {}", file_path))?;
 
@@ -282,7 +283,7 @@ async fn download_file_with_progress(
         let bytes = chunk_result
             .context("Error while downloading file stream")?
             .into_data()
-            .map_err(|e| anyhow!("Error while downloading file stream"))?;
+            .map_err(|e| anyhow!("Error while downloading file stream,{:?}", e))?;
 
         file.write_all(&bytes)
             .context("Error writing chunk to file")?;
