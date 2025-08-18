@@ -26,9 +26,7 @@ impl Service<Name> for DnsLoggingResolver {
         Box::pin(async move {
             let host = name.as_str().to_string();
             let host_clone_for_log = host.clone();
-
             debug!("Resolving DNS for: {}", &host_clone_for_log);
-
             let addrs_iter =
                 tokio::task::spawn_blocking(move || (host, 0).to_socket_addrs()).await??;
             info!("Resolved DNS for {}: {:?}", &host_clone_for_log, addrs_iter);
