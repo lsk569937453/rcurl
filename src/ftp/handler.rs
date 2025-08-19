@@ -1,18 +1,18 @@
-use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
+use std::path::Path;
+use url::Url;
 
 use crate::cli::app_config::Cli;
-use async_std::fs::File;
-use async_std::path::Path;
-use futures::io::BufReader;
-use futures_rustls::TlsConnector;
+use anyhow::Context as AnyhowContext;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
 use std::sync::Arc;
 use suppaftp::types::FileType;
-use suppaftp::AsyncRustlsConnector;
-use suppaftp::AsyncRustlsFtpStream;
+use suppaftp::RustlsConnector;
+use suppaftp::RustlsFtpStream;
+
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
@@ -22,19 +22,15 @@ pub struct ProgressBarIter<T> {
     pub progress: ProgressBar,
 }
 
-impl<W: futures::io::AsyncRead + Unpin> futures::io::AsyncRead for ProgressBarIter<W> {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<std::io::Result<usize>> {
-        let prev_len = buf.len() as u64;
-        if let Poll::Ready(e) = Pin::new(&mut self.it).poll_read(cx, buf) {
-            self.progress.inc(buf.len() as u64);
-            Poll::Ready(e)
-        } else {
-            Poll::Pending
+impl<T: Read> Read for ProgressBarIter<T> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let bytes_read = self.it.read(buf)?;
+
+        if bytes_read > 0 {
+            self.progress.inc(bytes_read as u64);
         }
+
+        Ok(bytes_read)
     }
 }
 
@@ -42,7 +38,9 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
     let uri: hyper::Uri = cli.url.parse()?;
     let host = uri.host().ok_or(anyhow!(""))?;
     let port = uri.port_u16().unwrap_or(21);
-    let mut ftp_stream = AsyncRustlsFtpStream::connect(format!("{host}:{port}")).await?;
+    let mut ftp_stream = RustlsFtpStream::connect(format!("{host}:{port}"))?;
+    ftp_stream.set_mode(suppaftp::Mode::ExtendedPassive);
+
     if scheme == "ftps" {
         let root_store = rustls::RootCertStore {
             roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
@@ -50,8 +48,8 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
         let config = rustls::ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth();
-        let ctx = AsyncRustlsConnector::from(TlsConnector::from(Arc::new(config)));
-        ftp_stream = ftp_stream.into_secure(ctx, host).await?;
+        let ctx = RustlsConnector::from(Arc::new(config));
+        ftp_stream = ftp_stream.into_secure(ctx, host)?;
     };
 
     if let Some(authority) = cli.authority_option.clone() {
@@ -59,18 +57,25 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
         ensure!(split.len() == 2, "User data error");
         ftp_stream
             .login(split[0], split[1])
-            .await
-            .map_err(|e| anyhow!("login error:{}", e))?;
-    }
-    ftp_stream.cwd(uri.path()).await?;
+            .context("Login error")?;
+    } else if uri.authority().is_some() {
+        let url = Url::parse(&cli.url)?;
+        let user = url.username();
+        let pass = url.password().ok_or(anyhow!("Password is empty!"))?;
 
-    assert!(ftp_stream.transfer_type(FileType::Binary).await.is_ok());
+        ftp_stream
+            .login(user, pass)
+            .context("Login error with credentials from URL")?;
+    }
+    ftp_stream.cwd(uri.path())?;
+
+    assert!(ftp_stream.transfer_type(FileType::Binary).is_ok());
     if let Some(upload_file) = cli.uploadfile_option {
         let path = Path::new(&upload_file);
-        let f = File::open(path).await?;
+        let f = File::open(path)?;
 
-        let reader = BufReader::new(f.clone());
-        let metadata = f.metadata().await?;
+        let reader = BufReader::new(f);
+        let metadata = reader.get_ref().metadata()?;
         let file_name = path
             .file_name()
             .ok_or(anyhow!("Can not find file name!"))?
@@ -83,14 +88,13 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
             it: reader,
             progress: pb.clone(),
         };
-        let _ = ftp_stream.put_file(String::from(file_name), &mut pro).await;
+        let _ = ftp_stream.put_file(String::from(file_name), &mut pro);
         pb.finish_with_message("upload success");
     } else if let Some(quote) = cli.quote_option.clone() {
-        let response = ftp_stream.site(quote).await?;
+        let response = ftp_stream.site(quote)?;
     } else {
         let file_list = ftp_stream
             .list(None)
-            .await
             .map_err(|e| anyhow!("Command failed, error:{}", e))?;
         let joined = file_list.join("\n");
 
@@ -117,6 +121,7 @@ async fn output(cli: Cli, mut item: Vec<u8>) -> Result<(), anyhow::Error> {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(file_path)
             .await?;
         let _ = file.write_all(item.as_slice()).await;

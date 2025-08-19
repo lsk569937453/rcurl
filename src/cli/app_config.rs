@@ -1,8 +1,7 @@
 use clap::Parser;
 
-#[derive(Parser)]
+#[derive(Parser, Default)]
 #[command(author, version, about, long_about, arg_required_else_help = true)]
-// #[clap(disable_help_flag = true)]
 pub struct Cli {
     /// The request url,like http://www.google.com
     pub url: String,
@@ -59,45 +58,13 @@ pub struct Cli {
     /// Retrieve only the bytes within RANGE
     #[arg(short = 'r', long = "range", value_name = "range")]
     pub range_option: Option<String>,
-    ///  Make the operation more talkative
-    #[arg(short = 'v', long = "verbose")]
-    pub debug: bool,
+    /// 设置日志级别：
+    /// -v   (debug)
+    /// -vv  (trace)
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+    pub verbosity: u8,
     #[arg(long = "http2")]
     pub http2: bool,
     #[arg(long = "http2-prior-knowledge")]
     pub http2_prior_knowledge: bool,
-    // /// Print help
-    // #[arg(short, long, action = clap::ArgAction::Help)]
-    // pub help: bool,
-    // /// Print help, including uncommon options
-    // #[arg(long, action = clap::ArgAction::Help)]
-    // pub help_all: bool,
-}
-
-impl Cli {
-    pub fn new() -> Self {
-        Cli {
-            url: String::new(),
-            method_option: None,
-            body_option: None,
-            form_option: Vec::new(),
-            headers: Vec::new(),
-            certificate_path_option: None,
-            authority_option: None,
-            user_agent_option: None,
-            cookie_option: None,
-            refer_option: None,
-            file_path_option: None,
-            uploadfile_option: None,
-            quote_option: None,
-            skip_certificate_validate: false,
-            header_option: false,
-            range_option: None,
-            http2: false,
-            http2_prior_knowledge: false,
-            debug: false,
-            // help: false,
-            // help_all: false,
-        }
-    }
 }
