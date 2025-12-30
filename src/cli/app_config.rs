@@ -3,12 +3,18 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
 #[command(author, version, about, long_about, after_help = "Examples:
-  rcurl http://example.com
-  rcurl -X POST -d 'data' http://example.com
-  rcurl -H 'Content-Type: application/json' -d '{\"key\":\"value\"}' http://example.com
-  rcurl -v http://example.com
-  rcurl -vv http://example.com
-  rcurl -o output.html http://example.com
+  rcurl http://example.com                    # Simple HTTP GET request
+  rcurl https://example.com                   # HTTPS GET request
+  rcurl -k https://example.com                # HTTPS with insecure (skip cert verify)
+  rcurl -X POST -d 'data' http://example.com  # POST with data
+  rcurl -H 'Content-Type: application/json' -d '{\"key\":\"value\"}' http://example.com  # POST JSON
+  rcurl -v http://example.com                 # Verbose mode (debug level)
+  rcurl -vv https://example.com               # More verbose (trace level)
+  rcurl -o output.html http://example.com     # Save output to file
+  rcurl ftp://ftp.example.com                 # FTP request
+  rcurl ftps://ftp.example.com                # FTPS (FTP over TLS)
+  rcurl sftp://sftp.example.com               # SFTP (SSH File Transfer)
+  rcurl -u user:pass ftp://ftp.example.com    # FTP with authentication
 
 Debug Levels:
   -v   verbose (debug level)
