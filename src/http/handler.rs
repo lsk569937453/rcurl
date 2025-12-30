@@ -1,25 +1,27 @@
 use crate::cli::app_config::Cli;
 use crate::http::dns_logging_connector::DnsLoggingResolver;
-use crate::http::proxy::{get_proxy_from_env, should_bypass_proxy, HttpProxyConnector, HttpForwardProxyConnector};
+use crate::http::proxy::{
+    HttpForwardProxyConnector, HttpProxyConnector, get_proxy_from_env, should_bypass_proxy,
+};
 use crate::tls::rcurl_cert_verifier::RcurlCertVerifier;
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use form_data_builder::FormData;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use http::header::{
-    HeaderName, HeaderValue, ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, USER_AGENT,
+    ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderName, HeaderValue, USER_AGENT,
 };
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, BodyStream, Full};
 use hyper::body::{Body, Incoming};
 use hyper::{Request, Response, Uri};
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use indicatif::{ProgressBar, ProgressStyle};
 use mime_guess::mime;
-use rustls::crypto::ring::{default_provider, DEFAULT_CIPHER_SUITES};
+use rustls::crypto::ring::{DEFAULT_CIPHER_SUITES, default_provider};
 use rustls::{ClientConfig, RootCertStore};
 use std::cmp::min;
 use std::convert::Infallible;
@@ -261,32 +263,31 @@ async fn send_https_request(
     // Check for proxy configuration
     let use_proxy = !cli.noproxy && !should_bypass_proxy(host);
 
-    if use_proxy {
-        if let Some(proxy_addr) = get_proxy_from_env("https") {
-            eprintln!("* Using HTTPS proxy: {}", proxy_addr);
-            let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
-                .with_tls_config(tls_config)
-                .https_or_http();
-            let proxy_connector = HttpProxyConnector::new(proxy_addr);
+    if let Some(proxy_addr) = use_proxy.then(|| get_proxy_from_env("https")).flatten() {
+        eprintln!("* Using HTTPS proxy: {}", proxy_addr);
 
-            let https_connector = if cli.http2 {
-                connector_builder
-                    .enable_all_versions()
-                    .wrap_connector(proxy_connector)
-            } else if cli.http2_prior_knowledge {
-                connector_builder
-                    .enable_http2()
-                    .wrap_connector(proxy_connector)
-            } else {
-                connector_builder
-                    .enable_http1()
-                    .wrap_connector(proxy_connector)
-            };
+        let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http();
 
-            let https_client: Client<_, Full<Bytes>> =
-                Client::builder(TokioExecutor::new()).build(https_connector);
-            return Ok(Box::pin(https_client.request(request)));
-        }
+        let proxy_connector = HttpProxyConnector::new(proxy_addr);
+
+        let https_connector = match (cli.http2, cli.http2_prior_knowledge) {
+            (true, _) => connector_builder
+                .enable_all_versions()
+                .wrap_connector(proxy_connector),
+            (_, true) => connector_builder
+                .enable_http2()
+                .wrap_connector(proxy_connector),
+            _ => connector_builder
+                .enable_http1()
+                .wrap_connector(proxy_connector),
+        };
+
+        let https_client: Client<_, Full<Bytes>> =
+            Client::builder(TokioExecutor::new()).build(https_connector);
+
+        return Ok(Box::pin(https_client.request(request)));
     }
 
     // Direct connection
@@ -325,24 +326,21 @@ async fn send_http_request(
     // Check for proxy configuration
     let use_proxy = !cli.noproxy && !should_bypass_proxy(host);
 
-    if use_proxy {
-        if let Some(proxy_addr) = get_proxy_from_env("http") {
-            eprintln!("* Using HTTP proxy: {}", proxy_addr);
+    if use_proxy && let Some(proxy_addr) = get_proxy_from_env("http") {
+        eprintln!("* Using HTTP proxy: {}", proxy_addr);
 
-            // For HTTP proxy, ensure URI includes scheme and host
-            let original_uri = request.uri().clone();
-            if original_uri.scheme().is_none() {
-                // Reconstruct full URL if scheme is missing
-                let full_url = format!("http://{}", original_uri);
-                *request.uri_mut() = full_url.parse()?;
-            }
-
-            // Use the proxy connector
-            let proxy_connector = HttpForwardProxyConnector::new(proxy_addr);
-            let http_client: Client<_, Full<Bytes>> =
-                Client::builder(TokioExecutor::new()).build(proxy_connector);
-            return Ok(Box::pin(async move { http_client.request(request).await }));
+        // For HTTP proxy, ensure URI includes scheme and host
+        let original_uri = request.uri().clone();
+        if original_uri.scheme().is_none() {
+            let full_url = format!("http://{}", original_uri);
+            *request.uri_mut() = full_url.parse()?;
         }
+
+        let proxy_connector = HttpForwardProxyConnector::new(proxy_addr);
+        let http_client: Client<_, Full<Bytes>> =
+            Client::builder(TokioExecutor::new()).build(proxy_connector);
+
+        return Ok(Box::pin(async move { http_client.request(request).await }));
     }
 
     // Direct connection
@@ -439,7 +437,9 @@ pub async fn handle_response(
         match String::from_utf8(body_bytes.to_vec()) {
             Ok(text) => print!("{text}"),
             Err(_) => {
-                error!("[rcurl: warning] response body is not valid UTF-8 and was not written to a file.");
+                error!(
+                    "[rcurl: warning] response body is not valid UTF-8 and was not written to a file."
+                );
                 error!("[rcurl: warning] to save to a file, use `-o <filename>`");
             }
         }
