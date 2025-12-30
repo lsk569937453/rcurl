@@ -1,10 +1,42 @@
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 
-#[derive(Parser, Default)]
-#[command(author, version, about, long_about, arg_required_else_help = true)]
+#[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
+#[command(author, version, about, long_about, after_help = "Examples:
+  rcurl http://example.com                    # Simple HTTP GET request
+  rcurl https://example.com                   # HTTPS GET request
+  rcurl -k https://example.com                # HTTPS with insecure (skip cert verify)
+  rcurl -X POST -d 'data' http://example.com  # POST with data
+  rcurl -H 'Content-Type: application/json' -d '{\"key\":\"value\"}' http://example.com  # POST JSON
+  rcurl -v http://example.com                 # Verbose mode (debug level)
+  rcurl -vv https://example.com               # More verbose (trace level)
+  rcurl -o output.html http://example.com     # Save output to file
+  rcurl ftp://ftp.example.com                 # FTP request
+  rcurl ftps://ftp.example.com                # FTPS (FTP over TLS)
+  rcurl sftp://sftp.example.com               # SFTP (SSH File Transfer)
+  rcurl -u user:pass ftp://ftp.example.com    # FTP with authentication
+
+Proxy Support:
+  Set environment variables to use proxy:
+    export ALL_PROXY=http://127.0.0.1:7890    # Unix/Linux/MacOS
+    set ALL_PROXY=http://127.0.0.1:7890       # Windows CMD
+    $env:ALL_PROXY='http://127.0.0.1:7890'    # Windows PowerShell
+  Or use separate settings:
+    export HTTPS_PROXY=http://127.0.0.1:7890  # For HTTPS requests
+    export HTTP_PROXY=http://127.0.0.1:7890   # For HTTP requests
+  Bypass proxy for specific hosts:
+    export NO_PROXY=example.com,localhost     # Skip proxy for these hosts
+  Disable proxy for single request:
+    rcurl https://example.com --noproxy       # Skip proxy for this request
+
+Debug Levels:
+  -v   verbose (debug level)
+  -vv  more verbose (trace level)
+
+Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {
     /// The request url,like http://www.google.com
-    pub url: String,
+    pub url: Option<String>,
     ///  Specify request method to use
     #[arg(short = 'X', long = "request", value_name = "method")]
     pub method_option: Option<String>,
@@ -67,4 +99,7 @@ pub struct Cli {
     pub http2: bool,
     #[arg(long = "http2-prior-knowledge")]
     pub http2_prior_knowledge: bool,
+    /// Disable use of proxy
+    #[arg(long = "noproxy")]
+    pub noproxy: bool,
 }

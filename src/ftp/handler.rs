@@ -35,7 +35,8 @@ impl<T: Read> Read for ProgressBarIter<T> {
 }
 
 pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
-    let uri: hyper::Uri = cli.url.parse()?;
+    let url = cli.url.as_ref().ok_or(anyhow!("URL is required"))?;
+    let uri: hyper::Uri = url.parse()?;
     let host = uri.host().ok_or(anyhow!(""))?;
     let port = uri.port_u16().unwrap_or(21);
     let mut ftp_stream = RustlsFtpStream::connect(format!("{host}:{port}"))?;
@@ -59,7 +60,8 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
             .login(split[0], split[1])
             .context("Login error")?;
     } else if uri.authority().is_some() {
-        let url = Url::parse(&cli.url)?;
+        let url_str = cli.url.as_ref().ok_or(anyhow!("URL is required"))?;
+        let url = Url::parse(url_str)?;
         let user = url.username();
         let pass = url.password().ok_or(anyhow!("Password is empty!"))?;
 

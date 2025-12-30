@@ -1,10 +1,12 @@
 use crate::cli::app_config::Cli;
 use crate::http::dns_logging_connector::DnsLoggingResolver;
+use crate::http::proxy::{get_proxy_from_env, should_bypass_proxy, HttpProxyConnector, HttpForwardProxyConnector};
 use crate::tls::rcurl_cert_verifier::RcurlCertVerifier;
 use anyhow::{anyhow, Context};
 use bytes::Bytes;
 use form_data_builder::FormData;
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use http::header::{
     HeaderName, HeaderValue, ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, USER_AGENT,
 };
@@ -35,7 +37,8 @@ const MAX_REDIRECTS: u8 = 10;
 pub async fn http_request_with_redirects(
     cli: Cli,
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
-    let mut current_url: Url = cli.url.parse().context("Failed to parse initial URL")?;
+    let url_str = cli.url.as_ref().ok_or(anyhow!("URL is required"))?;
+    let mut current_url: Url = url_str.parse().context("Failed to parse initial URL")?;
 
     for i in 0..MAX_REDIRECTS {
         let uri: Uri = current_url.to_string().parse()?;
@@ -160,7 +163,7 @@ fn build_request(cli: &Cli, uri: &Uri) -> Result<Request<Full<Bytes>>, anyhow::E
     }
 
     for (key, val) in header_map {
-        request_builder = request_builder.header(key.unwrap(), val);
+        request_builder = request_builder.header(key.ok_or(anyhow!("Key is null"))?, val);
     }
 
     let request = request_builder.body(Full::new(body_bytes))?;
@@ -190,69 +193,16 @@ async fn send_request(
     request: Request<Full<Bytes>>,
     scheme: &str,
 ) -> Result<Response<Incoming>, anyhow::Error> {
+    let uri = request.uri();
+    let host = uri.host().map(|h| h.to_string());
+
     let request_future = if scheme == "https" {
-        let mut root_store = RootCertStore::empty();
-        if let Some(file_path) = cli.certificate_path_option.as_ref() {
-            let f = std::fs::File::open(file_path)?;
-            let mut rd = std::io::BufReader::new(f);
-            for cert in rustls_pemfile::certs(&mut rd) {
-                root_store.add(cert?)?;
-            }
-        } else {
-            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        };
-
-        let provider = Arc::new(rustls::crypto::CryptoProvider {
-            cipher_suites: DEFAULT_CIPHER_SUITES.to_vec(),
-            ..default_provider()
-        });
-
-        let rcurl_verifier = RcurlCertVerifier::new(
-            cli.verbosity,
-            cli.skip_certificate_validate,
-            provider.clone(),
-            &root_store,
-        );
-
-        let mut tls_config = ClientConfig::builder_with_provider(provider)
-            .with_protocol_versions(rustls::DEFAULT_VERSIONS)?
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-
-        tls_config
-            .dangerous()
-            .set_certificate_verifier(Arc::new(rcurl_verifier));
-
-        let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
-            .https_only();
-        let resolver = DnsLoggingResolver::new();
-        let mut connector = HttpConnector::new_with_resolver(resolver);
-        connector.enforce_http(false);
-
-        let https_connector = if cli.http2 {
-            connector_builder
-                .enable_all_versions()
-                .wrap_connector(connector)
-        } else if cli.http2_prior_knowledge {
-            connector_builder.enable_http2().wrap_connector(connector)
-        } else {
-            connector_builder.enable_http1().wrap_connector(connector)
-        };
-
-        let https_client: Client<_, Full<Bytes>> =
-            Client::builder(TokioExecutor::new()).build(https_connector);
-        https_client.request(request)
+        send_https_request(cli, request, host.as_deref()).await?
     } else {
-        let resolver = DnsLoggingResolver::new();
-
-        let connector = HttpConnector::new_with_resolver(resolver);
-        let http_client: Client<_, Full<Bytes>> =
-            Client::builder(TokioExecutor::new()).build(connector);
-        http_client.request(request)
+        send_http_request(cli, request).await?
     };
 
-    let res = timeout(Duration::from_secs(30), request_future) // 增加超时时间
+    let res = timeout(Duration::from_secs(30), request_future)
         .await
         .context("Request timed out after 30 seconds")?
         .context("Failed to execute request")?;
@@ -266,6 +216,141 @@ async fn send_request(
     }
 
     Ok(res)
+}
+
+async fn send_https_request(
+    cli: &Cli,
+    request: Request<Full<Bytes>>,
+    host: Option<&str>,
+) -> Result<
+    BoxFuture<'static, Result<Response<Incoming>, hyper_util::client::legacy::Error>>,
+    anyhow::Error,
+> {
+    let mut root_store = RootCertStore::empty();
+    if let Some(file_path) = cli.certificate_path_option.as_ref() {
+        let f = std::fs::File::open(file_path)?;
+        let mut rd = std::io::BufReader::new(f);
+        for cert in rustls_pemfile::certs(&mut rd) {
+            root_store.add(cert?)?;
+        }
+    } else {
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    };
+
+    let provider = Arc::new(rustls::crypto::CryptoProvider {
+        cipher_suites: DEFAULT_CIPHER_SUITES.to_vec(),
+        ..default_provider()
+    });
+
+    let rcurl_verifier = RcurlCertVerifier::new(
+        cli.verbosity,
+        cli.skip_certificate_validate,
+        provider.clone(),
+        &root_store,
+    )?;
+
+    let mut tls_config = ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(rustls::DEFAULT_VERSIONS)?
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    tls_config
+        .dangerous()
+        .set_certificate_verifier(Arc::new(rcurl_verifier));
+
+    // Check for proxy configuration
+    let use_proxy = !cli.noproxy && !should_bypass_proxy(host);
+
+    if use_proxy {
+        if let Some(proxy_addr) = get_proxy_from_env("https") {
+            eprintln!("* Using HTTPS proxy: {}", proxy_addr);
+            let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
+                .with_tls_config(tls_config)
+                .https_or_http();
+            let proxy_connector = HttpProxyConnector::new(proxy_addr);
+
+            let https_connector = if cli.http2 {
+                connector_builder
+                    .enable_all_versions()
+                    .wrap_connector(proxy_connector)
+            } else if cli.http2_prior_knowledge {
+                connector_builder
+                    .enable_http2()
+                    .wrap_connector(proxy_connector)
+            } else {
+                connector_builder
+                    .enable_http1()
+                    .wrap_connector(proxy_connector)
+            };
+
+            let https_client: Client<_, Full<Bytes>> =
+                Client::builder(TokioExecutor::new()).build(https_connector);
+            return Ok(Box::pin(https_client.request(request)));
+        }
+    }
+
+    // Direct connection
+    let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_tls_config(tls_config)
+        .https_or_http();
+    let resolver = DnsLoggingResolver::new();
+    let mut connector = HttpConnector::new_with_resolver(resolver);
+    connector.enforce_http(false);
+
+    let https_connector = if cli.http2 {
+        connector_builder
+            .enable_all_versions()
+            .wrap_connector(connector)
+    } else if cli.http2_prior_knowledge {
+        connector_builder.enable_http2().wrap_connector(connector)
+    } else {
+        connector_builder.enable_http1().wrap_connector(connector)
+    };
+
+    let https_client: Client<_, Full<Bytes>> =
+        Client::builder(TokioExecutor::new()).build(https_connector);
+    Ok(Box::pin(https_client.request(request)))
+}
+
+async fn send_http_request(
+    cli: &Cli,
+    mut request: Request<Full<Bytes>>,
+) -> Result<
+    BoxFuture<'static, Result<Response<Incoming>, hyper_util::client::legacy::Error>>,
+    anyhow::Error,
+> {
+    let uri = request.uri();
+    let host = uri.host();
+
+    // Check for proxy configuration
+    let use_proxy = !cli.noproxy && !should_bypass_proxy(host);
+
+    if use_proxy {
+        if let Some(proxy_addr) = get_proxy_from_env("http") {
+            eprintln!("* Using HTTP proxy: {}", proxy_addr);
+
+            // For HTTP proxy, ensure URI includes scheme and host
+            let original_uri = request.uri().clone();
+            if original_uri.scheme().is_none() {
+                // Reconstruct full URL if scheme is missing
+                let full_url = format!("http://{}", original_uri);
+                *request.uri_mut() = full_url.parse()?;
+            }
+
+            // Use the proxy connector
+            let proxy_connector = HttpForwardProxyConnector::new(proxy_addr);
+            let http_client: Client<_, Full<Bytes>> =
+                Client::builder(TokioExecutor::new()).build(proxy_connector);
+            return Ok(Box::pin(async move { http_client.request(request).await }));
+        }
+    }
+
+    // Direct connection
+    let resolver = DnsLoggingResolver::new();
+    let connector = HttpConnector::new_with_resolver(resolver);
+    let http_client: Client<_, Full<Bytes>> =
+        Client::builder(TokioExecutor::new()).build(connector);
+    Ok(Box::pin(http_client.request(request)))
 }
 
 async fn download_file_with_progress(
