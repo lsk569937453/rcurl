@@ -16,6 +16,19 @@ use serde::{Deserialize, Serialize};
   rcurl sftp://sftp.example.com               # SFTP (SSH File Transfer)
   rcurl -u user:pass ftp://ftp.example.com    # FTP with authentication
 
+Proxy Support:
+  Set environment variables to use proxy:
+    export ALL_PROXY=http://127.0.0.1:7890    # Unix/Linux/MacOS
+    set ALL_PROXY=http://127.0.0.1:7890       # Windows CMD
+    $env:ALL_PROXY='http://127.0.0.1:7890'    # Windows PowerShell
+  Or use separate settings:
+    export HTTPS_PROXY=http://127.0.0.1:7890  # For HTTPS requests
+    export HTTP_PROXY=http://127.0.0.1:7890   # For HTTP requests
+  Bypass proxy for specific hosts:
+    export NO_PROXY=example.com,localhost     # Skip proxy for these hosts
+  Disable proxy for single request:
+    rcurl https://example.com --noproxy       # Skip proxy for this request
+
 Debug Levels:
   -v   verbose (debug level)
   -vv  more verbose (trace level)
@@ -86,4 +99,7 @@ pub struct Cli {
     pub http2: bool,
     #[arg(long = "http2-prior-knowledge")]
     pub http2_prior_knowledge: bool,
+    /// Disable use of proxy
+    #[arg(long = "noproxy")]
+    pub noproxy: bool,
 }
