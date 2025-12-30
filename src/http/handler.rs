@@ -160,7 +160,7 @@ fn build_request(cli: &Cli, uri: &Uri) -> Result<Request<Full<Bytes>>, anyhow::E
     }
 
     for (key, val) in header_map {
-        request_builder = request_builder.header(key.unwrap(), val);
+        request_builder = request_builder.header(key.ok_or(anyhow!("Key is null"))?, val);
     }
 
     let request = request_builder.body(Full::new(body_bytes))?;
@@ -212,7 +212,7 @@ async fn send_request(
             cli.skip_certificate_validate,
             provider.clone(),
             &root_store,
-        );
+        )?;
 
         let mut tls_config = ClientConfig::builder_with_provider(provider)
             .with_protocol_versions(rustls::DEFAULT_VERSIONS)?

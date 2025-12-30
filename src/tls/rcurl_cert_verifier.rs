@@ -22,17 +22,18 @@ impl RcurlCertVerifier {
         skip_validate: bool,
         provider: Arc<CryptoProvider>,
         root_store: &RootCertStore,
-    ) -> Self {
-        Self {
-            verifier: rustls::client::WebPkiServerVerifier::builder_with_provider(
-                root_store.clone().into(),
-                provider,
-            )
-            .build()
-            .unwrap(),
+    ) -> Result<Self, anyhow::Error> {
+        let verifier = rustls::client::WebPkiServerVerifier::builder_with_provider(
+            root_store.clone().into(),
+            provider,
+        )
+        .build()?; // ← 关键点：使用 ?
+
+        Ok(Self {
+            verifier,
             verbosity,
             skip_validate,
-        }
+        })
     }
 }
 
