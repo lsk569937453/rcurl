@@ -1,10 +1,23 @@
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 
-#[derive(Parser, Default)]
-#[command(author, version, about, long_about, arg_required_else_help = true)]
+#[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
+#[command(author, version, about, long_about, after_help = "Examples:
+  rcurl http://example.com
+  rcurl -X POST -d 'data' http://example.com
+  rcurl -H 'Content-Type: application/json' -d '{\"key\":\"value\"}' http://example.com
+  rcurl -v http://example.com
+  rcurl -vv http://example.com
+  rcurl -o output.html http://example.com
+
+Debug Levels:
+  -v   verbose (debug level)
+  -vv  more verbose (trace level)
+
+Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {
     /// The request url,like http://www.google.com
-    pub url: String,
+    pub url: Option<String>,
     ///  Specify request method to use
     #[arg(short = 'X', long = "request", value_name = "method")]
     pub method_option: Option<String>,

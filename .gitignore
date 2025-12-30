@@ -16,3 +16,4 @@ logs
 *.profraw
 *.html
 .vscode
+.claude

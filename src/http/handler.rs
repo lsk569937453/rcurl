@@ -35,7 +35,8 @@ const MAX_REDIRECTS: u8 = 10;
 pub async fn http_request_with_redirects(
     cli: Cli,
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
-    let mut current_url: Url = cli.url.parse().context("Failed to parse initial URL")?;
+    let url_str = cli.url.as_ref().ok_or(anyhow!("URL is required"))?;
+    let mut current_url: Url = url_str.parse().context("Failed to parse initial URL")?;
 
     for i in 0..MAX_REDIRECTS {
         let uri: Uri = current_url.to_string().parse()?;
