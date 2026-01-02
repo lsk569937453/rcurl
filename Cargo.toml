@@ -2,7 +2,6 @@
 name = "rcurl"
 version = "0.0.30"
 edition = "2024"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -31,6 +30,7 @@ indicatif = "=0.18.0"
 inquire = "=0.7.5"
 log = "=0.4.27"
 mime_guess = "=2.0.5"
+ping = "=0.7.0"
 pki-types = { package = "rustls-pki-types", version = "=1.12.0" }
 rustls = { version = "=0.23.31", default-features = false, features = [
     "logging",
@@ -55,4 +55,3 @@ tracing-subscriber = { version = "=0.3.19", features = ["env-filter"] }
 url = "=2.5.4"
 webpki-roots = "=1.0.2"
 x509-parser = "=0.17.0"
-ping = "0.7.0"
