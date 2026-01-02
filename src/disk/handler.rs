@@ -23,7 +23,10 @@ pub async fn disk_size_command(path: String, _cli: Cli) -> Result<RcurlResponse,
     println!("{}", "-".repeat(76));
 
     for entry in entries {
-        println!("{:<50} {:>12} {}", entry.name, entry.size, entry.file_type);
+        let name_width = display_width(&entry.display_name);
+        let padding = if name_width < 50 { 50 - name_width } else { 0 };
+        let padding_str = " ".repeat(padding);
+        println!("{}{} {:>12} {:>12}", entry.display_name, padding_str, entry.size, entry.file_type);
     }
 
     Ok(RcurlResponse::DiskSize(()))
@@ -31,8 +34,56 @@ pub async fn disk_size_command(path: String, _cli: Cli) -> Result<RcurlResponse,
 
 struct DiskEntry {
     name: String,
+    display_name: String,
     size: String,
     file_type: String,
+}
+
+/// Calculate the display width of a string (CJK characters count as 2)
+fn display_width(s: &str) -> usize {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii() {
+                1
+            } else {
+                // CJK and other wide characters typically take 2 columns
+                2
+            }
+        })
+        .sum()
+}
+
+/// Truncate string to fit within max display width
+fn truncate_for_display(s: &str, max_width: usize) -> String {
+    let mut current_width = 0;
+    let mut result = String::new();
+
+    for c in s.chars() {
+        let char_width = if c.is_ascii() { 1 } else { 2 };
+        if current_width + char_width > max_width {
+            break;
+        }
+        result.push(c);
+        current_width += char_width;
+    }
+
+    if result.len() < s.len() {
+        // Add ellipsis if truncated
+        let ellipsis = "...";
+        while display_width(&result) + display_width(ellipsis) > max_width && !result.is_empty() {
+            result.pop();
+            // If last char was wide, we need to account for that
+            let last_char_width = if result.chars().last().map_or(false, |c| !c.is_ascii()) {
+                2
+            } else {
+                1
+            };
+            current_width = current_width.saturating_sub(last_char_width);
+        }
+        result.push_str(ellipsis);
+    }
+
+    result
 }
 
 fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
@@ -41,12 +92,15 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
     if path.is_file() {
         let metadata = path.metadata()?;
         let size = format_bytes(metadata.len());
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let display_name = truncate_for_display(&name, 48);
         entries.push(DiskEntry {
-            name: path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
+            name,
+            display_name,
             size,
             file_type: "FILE".to_string(),
         });
@@ -110,8 +164,10 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
+            let display_name = truncate_for_display(&name, 48);
             entries.push(DiskEntry {
                 name,
+                display_name,
                 size: format_bytes(size),
                 file_type: "DIR".to_string(),
             });
@@ -124,8 +180,10 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
+            let display_name = truncate_for_display(&name, 48);
             entries.push(DiskEntry {
                 name,
+                display_name,
                 size: format_bytes(size),
                 file_type: "FILE".to_string(),
             });
