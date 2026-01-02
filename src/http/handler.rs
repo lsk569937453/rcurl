@@ -200,13 +200,14 @@ async fn send_request(
     let uri = request.uri();
     let host = uri.host().map(|h| h.to_string());
 
-    let request_future = if scheme == "https" {
-        send_https_request(cli, request, host.as_deref()).await?
-    } else {
-        send_http_request(cli, request).await?
+    let fut = async {
+        if scheme == "https" {
+            send_https_request(cli, request, host.as_deref()).await
+        } else {
+            send_http_request(cli, request).await
+        }
     };
-
-    let res = timeout(Duration::from_secs(30), request_future)
+    let res = timeout(Duration::from_secs(30), fut)
         .await
         .context("Request timed out after 30 seconds")?
         .context("Failed to execute request")?;
@@ -226,7 +227,7 @@ async fn send_https_request(
     cli: &Cli,
     request: Request<Full<Bytes>>,
     host: Option<&str>,
-) -> Result<BoxFuture<'static, Result<Response<Incoming>, anyhow::Error>>, anyhow::Error> {
+) -> Result<Response<Incoming>, anyhow::Error> {
     let mut root_store = RootCertStore::empty();
     if let Some(file_path) = cli.certificate_path_option.as_ref() {
         let f = std::fs::File::open(file_path)?;
@@ -285,10 +286,8 @@ async fn send_https_request(
 
         let https_client: Client<_, Full<Bytes>> =
             Client::builder(TokioExecutor::new()).build(https_connector);
-
-        return Ok(Box::pin(
-            https_client.request(request).map_err(anyhow::Error::from),
-        ));
+        let response = https_client.request(request).await?;
+        return Ok(response);
     }
 
     // Direct connection
@@ -311,15 +310,14 @@ async fn send_https_request(
 
     let https_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(https_connector);
-    Ok(Box::pin(
-        https_client.request(request).map_err(anyhow::Error::from),
-    ))
+    let response = https_client.request(request).await?;
+    return Ok(response);
 }
 use futures::FutureExt;
 async fn send_http_request(
     cli: &Cli,
     mut request: Request<Full<Bytes>>,
-) -> Result<BoxFuture<'static, Result<Response<Incoming>, anyhow::Error>>, anyhow::Error> {
+) -> Result<Response<Incoming>, anyhow::Error> {
     let uri = request.uri();
     let host = uri.host();
 
@@ -348,14 +346,8 @@ async fn send_http_request(
         });
 
         // 4. 直接发送 request（absolute-form 不会被改）
-        return Ok(async move {
-            let resp = sender
-                .send_request(request)
-                .await
-                .map_err(|e| anyhow!("{}", e))?;
-            Ok(resp)
-        }
-        .boxed());
+        let resp = sender.send_request(request).await?;
+        return Ok(resp);
     }
 
     // Direct connection
@@ -363,14 +355,8 @@ async fn send_http_request(
     let connector = HttpConnector::new_with_resolver(resolver);
     let http_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(connector);
-    Ok(async move {
-        let resp = http_client
-            .request(request)
-            .await
-            .map_err(|e| anyhow!("{}", e))?;
-        Ok(resp)
-    }
-    .boxed())
+    let resp = http_client.request(request).await?;
+    Ok(resp)
 }
 
 async fn download_file_with_progress(
