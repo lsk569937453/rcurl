@@ -7,14 +7,15 @@ use crate::tls::rcurl_cert_verifier::RcurlCertVerifier;
 use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use form_data_builder::FormData;
-use futures::StreamExt;
 use futures::future::BoxFuture;
+use futures::{StreamExt, TryFutureExt};
 use http::header::{
     ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderName, HeaderValue, USER_AGENT,
 };
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, BodyStream, Full};
 use hyper::body::{Body, Incoming};
+use hyper::client::conn::http1;
 use hyper::{Request, Response, Uri};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -32,6 +33,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
+use tower_service::Service;
 use url::Url;
 
 const MAX_REDIRECTS: u8 = 10;
@@ -224,10 +226,7 @@ async fn send_https_request(
     cli: &Cli,
     request: Request<Full<Bytes>>,
     host: Option<&str>,
-) -> Result<
-    BoxFuture<'static, Result<Response<Incoming>, hyper_util::client::legacy::Error>>,
-    anyhow::Error,
-> {
+) -> Result<BoxFuture<'static, Result<Response<Incoming>, anyhow::Error>>, anyhow::Error> {
     let mut root_store = RootCertStore::empty();
     if let Some(file_path) = cli.certificate_path_option.as_ref() {
         let f = std::fs::File::open(file_path)?;
@@ -287,7 +286,9 @@ async fn send_https_request(
         let https_client: Client<_, Full<Bytes>> =
             Client::builder(TokioExecutor::new()).build(https_connector);
 
-        return Ok(Box::pin(https_client.request(request)));
+        return Ok(Box::pin(
+            https_client.request(request).map_err(|e| anyhow!("{}", e)),
+        ));
     }
 
     // Direct connection
@@ -310,16 +311,15 @@ async fn send_https_request(
 
     let https_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(https_connector);
-    Ok(Box::pin(https_client.request(request)))
+    Ok(Box::pin(
+        https_client.request(request).map_err(|e| anyhow!("{}", e)),
+    ))
 }
-
+use futures::FutureExt;
 async fn send_http_request(
     cli: &Cli,
     mut request: Request<Full<Bytes>>,
-) -> Result<
-    BoxFuture<'static, Result<Response<Incoming>, hyper_util::client::legacy::Error>>,
-    anyhow::Error,
-> {
+) -> Result<BoxFuture<'static, Result<Response<Incoming>, anyhow::Error>>, anyhow::Error> {
     let uri = request.uri();
     let host = uri.host();
 
@@ -331,16 +331,31 @@ async fn send_http_request(
 
         // For HTTP proxy, ensure URI includes scheme and host
         let original_uri = request.uri().clone();
-        if original_uri.scheme().is_none() {
-            let full_url = format!("http://{}", original_uri);
-            *request.uri_mut() = full_url.parse()?;
+        *request.uri_mut() = original_uri;
+
+        let mut proxy_connector = HttpForwardProxyConnector::new(proxy_addr);
+        let uri = request.uri().clone();
+        let io = proxy_connector.call(uri).await?;
+
+        // 2. HTTP/1.1 handshake（关键）
+        let (mut sender, conn) = http1::handshake(io).await?;
+
+        // 3. 驱动连接（必须）
+        tokio::spawn(async move {
+            if let Err(e) = conn.await {
+                eprintln!("proxy connection error: {:?}", e);
+            }
+        });
+
+        // 4. 直接发送 request（absolute-form 不会被改）
+        return Ok(async move {
+            let resp = sender
+                .send_request(request)
+                .await
+                .map_err(|e| anyhow!("{}", e))?;
+            Ok(resp)
         }
-
-        let proxy_connector = HttpForwardProxyConnector::new(proxy_addr);
-        let http_client: Client<_, Full<Bytes>> =
-            Client::builder(TokioExecutor::new()).build(proxy_connector);
-
-        return Ok(Box::pin(async move { http_client.request(request).await }));
+        .boxed());
     }
 
     // Direct connection
@@ -348,7 +363,14 @@ async fn send_http_request(
     let connector = HttpConnector::new_with_resolver(resolver);
     let http_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(connector);
-    Ok(Box::pin(http_client.request(request)))
+    Ok(async move {
+        let resp = http_client
+            .request(request)
+            .await
+            .map_err(|e| anyhow!("{}", e))?;
+        Ok(resp)
+    }
+    .boxed())
 }
 
 async fn download_file_with_progress(
