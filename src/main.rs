@@ -13,6 +13,7 @@ mod history;
 mod http;
 mod ping;
 mod response;
+mod telnet;
 
 #[tokio::main]
 async fn main() {

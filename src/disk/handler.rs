@@ -1,15 +1,12 @@
 use crate::cli::app_config::Cli;
 use crate::response::res::RcurlResponse;
 use anyhow::Context;
-use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
+use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
-pub async fn disk_size_command(
-    path: String,
-    _cli: Cli,
-) -> Result<RcurlResponse, anyhow::Error> {
+pub async fn disk_size_command(path: String, _cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
     let path_obj = Path::new(&path);
 
     // Check if path exists
@@ -45,7 +42,11 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
         let metadata = path.metadata()?;
         let size = format_bytes(metadata.len());
         entries.push(DiskEntry {
-            name: path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
             size,
             file_type: "FILE".to_string(),
         });
@@ -74,19 +75,23 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
 
         // Create spinning progress bar
         let pb = ProgressBar::new_spinner();
-        pb.set_style(ProgressStyle::default_bar()
-            .template("{spinner:.green} {msg}")
-            .unwrap());
+        pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} {msg}")?);
         pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
         // Calculate directory sizes with progress indicator
         let mut dir_sizes = Vec::new();
         for (idx, dir_path) in dirs.iter().enumerate() {
-            let dir_name = dir_path.file_name()
+            let dir_name = dir_path
+                .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            pb.set_message(format!("Scanning [{}/{}]: {}", idx + 1, dirs.len(), dir_name));
+            pb.set_message(format!(
+                "Scanning [{}/{}]: {}",
+                idx + 1,
+                dirs.len(),
+                dir_name
+            ));
 
             let size = calculate_dir_size(dir_path)?;
             dir_sizes.push((dir_path.clone(), size));
@@ -100,7 +105,8 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
 
         // Add directories first
         for (dir_path, size) in dir_sizes {
-            let name = dir_path.file_name()
+            let name = dir_path
+                .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
@@ -113,7 +119,8 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
 
         // Then add files
         for (file_path, size) in files {
-            let name = file_path.file_name()
+            let name = file_path
+                .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();

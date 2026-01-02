@@ -16,6 +16,14 @@ pub enum QuickCommand {
         #[arg(default_value = ".")]
         target: String,
     },
+    /// Telnet to a host and port
+    #[command(alias = "t")]
+    Telnet {
+        /// Host to connect (domain or IP address)
+        host: String,
+        /// Port to connect
+        port: u16,
+    },
 }
 
 #[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
@@ -55,6 +63,8 @@ Quick Commands:
   rcurl p 8.8.8.8                             # Ping an IP address (shorthand)
   rcurl disk .                                # Check disk size (current directory)
   rcurl d /home                               # Check disk size for specific path (shorthand)
+  rcurl telnet example.com 80                 # Telnet to host:port
+  rcurl t 192.168.1.1 23                     # Telnet with shorthand
 
 Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {

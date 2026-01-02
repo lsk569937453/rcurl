@@ -9,4 +9,5 @@ pub enum RcurlResponse {
     Http(HyperResponse<BoxBody<Bytes, Infallible>>),
     Ping(()),
     DiskSize(()),
+    Telnet(()),
 }

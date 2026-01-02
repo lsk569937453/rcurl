@@ -83,7 +83,7 @@ pub fn save_request(command: &str, cli: &Cli) -> Result<()> {
 pub fn command_from_cli(cli: &Cli) -> String {
     let mut cmd = String::from("rcurl");
 
-    // Handle quick commands (ping, disk, etc.)
+    // Handle quick commands (ping, disk, telnet, etc.)
     if let Some(ref quick_cmd) = cli.quick_cmd {
         match quick_cmd {
             QuickCommand::Ping { target } => {
@@ -92,6 +92,10 @@ pub fn command_from_cli(cli: &Cli) -> String {
             }
             QuickCommand::Disk { target } => {
                 cmd.push_str(&format!(" d {}", target));
+                return cmd;
+            }
+            QuickCommand::Telnet { host, port } => {
+                cmd.push_str(&format!(" t {} {}", host, port));
                 return cmd;
             }
         }

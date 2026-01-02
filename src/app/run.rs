@@ -5,6 +5,7 @@ use crate::history::{command_from_cli, load_history, save_request};
 use crate::http::handler::http_request_with_redirects;
 use crate::ping::handler::ping_command;
 use crate::response::res::RcurlResponse;
+use crate::telnet::handler::telnet_command;
 use clap::Parser;
 use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -107,6 +108,9 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
             }
             QuickCommand::Disk { target } => {
                 disk_size_command(target.clone(), cli).await
+            }
+            QuickCommand::Telnet { host, port } => {
+                telnet_command(host.clone(), *port, cli).await
             }
         };
     }
