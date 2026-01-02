@@ -1,7 +1,9 @@
-use crate::cli::app_config::Cli;
+use crate::cli::app_config::{Cli, QuickCommand};
+use crate::disk::handler::disk_size_command;
 use crate::ftp::handler::ftp_request;
 use crate::history::{command_from_cli, load_history, save_request};
 use crate::http::handler::http_request_with_redirects;
+use crate::ping::handler::ping_command;
 use crate::response::res::RcurlResponse;
 use clap::Parser;
 use tracing::Level;
@@ -15,8 +17,8 @@ pub async fn main_with_error() -> Result<RcurlResponse, anyhow::Error> {
 }
 
 async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
-    // 如果没有 URL，进入交互模式
-    if cli.url.is_none() {
+    // 如果没有 URL 且没有命令，进入交互模式
+    if cli.url.is_none() && cli.quick_cmd.is_none() {
         return interactive_mode().await;
     }
 
@@ -97,6 +99,19 @@ async fn interactive_mode() -> Result<RcurlResponse, anyhow::Error> {
 }
 
 async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
+    // Handle quick commands
+    if let Some(ref cmd) = cli.quick_cmd {
+        return match cmd {
+            QuickCommand::Ping { target } => {
+                ping_command(target.clone(), cli).await
+            }
+            QuickCommand::Disk { target } => {
+                disk_size_command(target.clone(), cli).await
+            }
+        };
+    }
+
+    // Default URL-based behavior
     let url = cli.url.clone().unwrap_or_default();
     let uri: hyper::Uri = url.parse()?;
 

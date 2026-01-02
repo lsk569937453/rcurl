@@ -8,8 +8,10 @@ mod tls;
 use crate::app::run::main_with_error;
 mod app;
 mod cli;
+mod disk;
 mod history;
 mod http;
+mod ping;
 mod response;
 
 #[tokio::main]

@@ -7,4 +7,6 @@ use std::convert::Infallible;
 pub enum RcurlResponse {
     Ftp(()),
     Http(HyperResponse<BoxBody<Bytes, Infallible>>),
+    Ping(()),
+    DiskSize(()),
 }

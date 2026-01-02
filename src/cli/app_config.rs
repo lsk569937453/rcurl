@@ -1,5 +1,22 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
+
+#[derive(Subcommand, Serialize, Deserialize, Debug, Clone)]
+pub enum QuickCommand {
+    /// Ping a host to check connectivity
+    #[command(alias = "p")]
+    Ping {
+        /// Host to ping (domain or IP address)
+        target: String,
+    },
+    /// Check disk size for a path
+    #[command(alias = "d")]
+    Disk {
+        /// Path to check (default: current directory)
+        #[arg(default_value = ".")]
+        target: String,
+    },
+}
 
 #[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
 #[command(author, version, about, long_about, after_help = "Examples:
@@ -32,6 +49,12 @@ Proxy Support:
 Debug Levels:
   -v   verbose (debug level)
   -vv  more verbose (trace level)
+
+Quick Commands:
+  rcurl ping google.com                       # Ping a host
+  rcurl p 8.8.8.8                             # Ping an IP address (shorthand)
+  rcurl disk .                                # Check disk size (current directory)
+  rcurl d /home                               # Check disk size for specific path (shorthand)
 
 Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {
@@ -102,4 +125,7 @@ pub struct Cli {
     /// Disable use of proxy
     #[arg(long = "noproxy")]
     pub noproxy: bool,
+    /// Quick command (ping, disk, or their shorthands p, d)
+    #[command(subcommand)]
+    pub quick_cmd: Option<QuickCommand>,
 }

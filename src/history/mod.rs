@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::cli::app_config::Cli;
+use crate::cli::app_config::{Cli, QuickCommand};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
@@ -82,6 +82,20 @@ pub fn save_request(command: &str, cli: &Cli) -> Result<()> {
 /// 将 Cli 结构转换为命令字符串
 pub fn command_from_cli(cli: &Cli) -> String {
     let mut cmd = String::from("rcurl");
+
+    // Handle quick commands (ping, disk, etc.)
+    if let Some(ref quick_cmd) = cli.quick_cmd {
+        match quick_cmd {
+            QuickCommand::Ping { target } => {
+                cmd.push_str(&format!(" p {}", target));
+                return cmd;
+            }
+            QuickCommand::Disk { target } => {
+                cmd.push_str(&format!(" d {}", target));
+                return cmd;
+            }
+        }
+    }
 
     if let Some(ref method) = cli.method_option {
         cmd.push_str(&format!(" -X {}", method));
