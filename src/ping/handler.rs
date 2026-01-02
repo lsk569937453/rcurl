@@ -5,18 +5,20 @@ use std::net::IpAddr;
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 use std::time::Instant;
+
 fn resolve_host(host: &str) -> anyhow::Result<IpAddr> {
     let addr = format!("{}:0", host);
     let sock = addr
         .to_socket_addrs()
-        .map_err(|e| anyhow!("ping: cannot resolve host {}", host))?
+        .map_err(|_| anyhow::anyhow!("ping: cannot resolve host: {}", host))?
         .next()
-        .ok_or_else(|| anyhow::anyhow!("resolve failed"))?;
+        .ok_or_else(|| anyhow::anyhow!("ping: cannot resolve host: {}", host))?;
     Ok(sock.ip())
 }
+
 pub async fn ping_command(host: String, _cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
     let count = 4;
-    let payload_size = 32; // 对齐 Windows ping
+    let payload_size = 32;
 
     let ip = resolve_host(&host)?;
     println!(
@@ -31,7 +33,6 @@ pub async fn ping_command(host: String, _cli: Cli) -> Result<RcurlResponse, anyh
     for seq in 1..=count {
         transmitted += 1;
 
-        // 构造 ping 实例
         let mut p = ping::new(ip);
 
         let start = Instant::now();
@@ -43,14 +44,13 @@ pub async fn ping_command(host: String, _cli: Cli) -> Result<RcurlResponse, anyh
                 println!("Reply from {}: bytes={} time={}ms", ip, payload_size, rtt);
             }
             Err(e) => {
-                println!("icmp_seq={} error: {}", seq, e);
+                println!("Request timed out.");
             }
         }
 
         std::thread::sleep(Duration::from_secs(1));
     }
 
-    // 统计输出
     println!();
     println!("Ping statistics for {}:", ip);
     println!(
