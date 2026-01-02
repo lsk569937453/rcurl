@@ -1,7 +1,7 @@
 use hyper::Uri;
-use hyper_util::rt::TokioIo;
-use hyper_util::client::legacy::connect::proxy::Tunnel;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::connect::proxy::Tunnel;
+use hyper_util::rt::TokioIo;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -23,9 +23,7 @@ impl HttpProxyConnector {
     /// # Arguments
     /// * `proxy_addr` - The proxy address in format "host:port" (e.g., "127.0.0.1:7890")
     pub fn new(proxy_addr: String) -> Self {
-        let proxy_dst = format!("http://{}", proxy_addr)
-            .parse()
-            .expect("Invalid proxy address");
+        let proxy_dst = format!("http://{}", proxy_addr).parse().unwrap_or_default();
         let mut http = HttpConnector::new();
         http.enforce_http(false);
         Self {
