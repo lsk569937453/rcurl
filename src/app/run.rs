@@ -86,7 +86,13 @@ async fn interactive_mode() -> Result<RcurlResponse, anyhow::Error> {
     // 初始化日志
     init_logging(cli.verbosity);
 
-    // 执行请求（不保存历史，避免重复保存）
+    // 保存请求到历史（将选中的命令移到顶部）
+    let command = command_from_cli(&cli);
+    if let Err(e) = save_request(&command, &cli) {
+        eprintln!("Warning: Failed to save request history: {}", e);
+    }
+
+    // 执行请求
     execute_request(cli).await
 }
 
