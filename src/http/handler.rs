@@ -287,7 +287,7 @@ async fn send_https_request(
             Client::builder(TokioExecutor::new()).build(https_connector);
 
         return Ok(Box::pin(
-            https_client.request(request).map_err(|e| anyhow!("{}", e)),
+            https_client.request(request).map_err(anyhow::Error::from),
         ));
     }
 
@@ -312,7 +312,7 @@ async fn send_https_request(
     let https_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(https_connector);
     Ok(Box::pin(
-        https_client.request(request).map_err(|e| anyhow!("{}", e)),
+        https_client.request(request).map_err(anyhow::Error::from),
     ))
 }
 use futures::FutureExt;
