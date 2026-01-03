@@ -3,7 +3,9 @@ use crate::response::res::RcurlResponse;
 use anyhow::Context;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use walkdir::WalkDir;
 
 pub async fn disk_size_command(path: String, _cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
@@ -14,8 +16,15 @@ pub async fn disk_size_command(path: String, _cli: Cli) -> Result<RcurlResponse,
         return Err(anyhow::anyhow!("disk-size: path does not exist: {}", path));
     }
 
+    // Start timer
+    let start = Instant::now();
+
     // Get disk usage
     let entries = get_disk_usage(path_obj)?;
+
+    // Calculate elapsed time
+    let elapsed = start.elapsed();
+    let duration_str = format_duration(elapsed);
 
     // Display results
     println!("Disk usage for: {}", path_obj.display());
@@ -28,6 +37,9 @@ pub async fn disk_size_command(path: String, _cli: Cli) -> Result<RcurlResponse,
         let padding_str = " ".repeat(padding);
         println!("{}{} {:>12} {:>12}", entry.display_name, padding_str, entry.size, entry.file_type);
     }
+
+    println!();
+    println!("Time elapsed: {}", duration_str);
 
     Ok(RcurlResponse::DiskSize(()))
 }
@@ -132,24 +144,27 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
         pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} {msg}")?);
         pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
-        // Calculate directory sizes with progress indicator
-        let mut dir_sizes = Vec::new();
-        for (idx, dir_path) in dirs.iter().enumerate() {
-            let dir_name = dir_path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            pb.set_message(format!(
-                "Scanning [{}/{}]: {}",
-                idx + 1,
-                dirs.len(),
-                dir_name
-            ));
+        // Calculate directory sizes in parallel with progress indicator
+        let mut dir_sizes: Vec<(PathBuf, u64)> = dirs
+            .par_iter()  // Parallel iteration
+            .enumerate()
+            .map(|(idx, dir_path)| {
+                let dir_name = dir_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                pb.set_message(format!(
+                    "Scanning [{}/{}]: {}",
+                    idx + 1,
+                    dirs.len(),
+                    dir_name
+                ));
 
-            let size = calculate_dir_size(dir_path)?;
-            dir_sizes.push((dir_path.clone(), size));
-        }
+                let size = calculate_dir_size_parallel(dir_path);
+                (dir_path.clone(), size)
+            })
+            .collect();
 
         pb.finish_with_message("Scan complete!");
 
@@ -193,22 +208,16 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
     Ok(entries)
 }
 
-fn calculate_dir_size(dir_path: &Path) -> Result<u64, anyhow::Error> {
-    let mut total = 0u64;
-
-    for entry in WalkDir::new(dir_path)
+/// Parallel version of calculate_dir_size for rayon
+fn calculate_dir_size_parallel(dir_path: &Path) -> u64 {
+    WalkDir::new(dir_path)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
-    {
-        if entry.file_type().is_file() {
-            if let Ok(metadata) = entry.metadata() {
-                total += metadata.len();
-            }
-        }
-    }
-
-    Ok(total)
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .sum()
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -227,5 +236,21 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.2} KB", bytes as f64 / KB as f64)
     } else {
         format!("{} B", bytes)
+    }
+}
+
+/// Format duration in human-readable format
+fn format_duration(duration: std::time::Duration) -> String {
+    let secs = duration.as_secs_f64();
+
+    if secs >= 60.0 {
+        let minutes = (secs / 60.0).floor();
+        let seconds = secs % 60.0;
+        format!("{}m {:.2}s", minutes, seconds)
+    } else if secs >= 1.0 {
+        format!("{:.2}s", secs)
+    } else {
+        let millis = duration.as_millis();
+        format!("{}ms", millis)
     }
 }
