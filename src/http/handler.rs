@@ -7,7 +7,6 @@ use crate::tls::rcurl_cert_verifier::RcurlCertVerifier;
 use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use form_data_builder::FormData;
-use futures::future::BoxFuture;
 use futures::{StreamExt, TryFutureExt};
 use http::header::{
     ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderName, HeaderValue, USER_AGENT,

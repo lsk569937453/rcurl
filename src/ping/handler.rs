@@ -1,6 +1,5 @@
 use crate::cli::app_config::Cli;
 use crate::response::res::RcurlResponse;
-use ping::ping;
 use std::net::IpAddr;
 use std::net::ToSocketAddrs;
 use std::time::Duration;
@@ -33,7 +32,7 @@ pub async fn ping_command(host: String, _cli: Cli) -> Result<RcurlResponse, anyh
     for seq in 1..=count {
         transmitted += 1;
 
-        let mut p = ping::new(ip);
+        let p = ping::new(ip);
 
         let start = Instant::now();
         match p.send() {

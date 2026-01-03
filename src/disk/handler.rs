@@ -33,9 +33,12 @@ pub async fn disk_size_command(path: String, _cli: Cli) -> Result<RcurlResponse,
 
     for entry in entries {
         let name_width = display_width(&entry.display_name);
-        let padding = if name_width < 50 { 50 - name_width } else { 0 };
+        let padding = 50usize.saturating_sub(name_width);
         let padding_str = " ".repeat(padding);
-        println!("{}{} {:>12} {:>12}", entry.display_name, padding_str, entry.size, entry.file_type);
+        println!(
+            "{}{} {:>12} {:>12}",
+            entry.display_name, padding_str, entry.size, entry.file_type
+        );
     }
 
     println!();
@@ -85,11 +88,11 @@ fn truncate_for_display(s: &str, max_width: usize) -> String {
         while display_width(&result) + display_width(ellipsis) > max_width && !result.is_empty() {
             result.pop();
             // If last char was wide, we need to account for that
-            let last_char_width = if result.chars().last().map_or(false, |c| !c.is_ascii()) {
-                2
-            } else {
-                1
-            };
+            let last_char_width = result
+                .chars()
+                .last()
+                .map(|c| if c.is_ascii() { 1 } else { 2 })
+                .unwrap_or(1);
             current_width = current_width.saturating_sub(last_char_width);
         }
         result.push_str(ellipsis);
@@ -132,10 +135,10 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
 
             if ft.is_dir() {
                 dirs.push(path_buf);
-            } else if ft.is_file() {
-                if let Ok(metadata) = entry.metadata() {
-                    files.push((path_buf, metadata.len()));
-                }
+            } else if ft.is_file()
+                && let Ok(metadata) = entry.metadata()
+            {
+                files.push((path_buf, metadata.len()));
             }
         }
 
@@ -146,7 +149,7 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
 
         // Calculate directory sizes in parallel with progress indicator
         let mut dir_sizes: Vec<(PathBuf, u64)> = dirs
-            .par_iter()  // Parallel iteration
+            .par_iter() // Parallel iteration
             .enumerate()
             .map(|(idx, dir_path)| {
                 let dir_name = dir_path

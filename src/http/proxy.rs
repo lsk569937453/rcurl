@@ -2,8 +2,7 @@ use hyper::Uri;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::connect::proxy::Tunnel;
 use hyper_util::rt::TokioIo;
-use std::future::Future;
-use std::pin::Pin;
+
 use std::task::{Context, Poll};
 use tokio::net::TcpStream;
 use tower_service::Service;
