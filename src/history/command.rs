@@ -23,6 +23,10 @@ pub fn command_from_cli(cli: &Cli) -> String {
                 cmd.push_str(&format!(" ns {}", domain));
                 return cmd;
             }
+            QuickCommand::Whois { target } => {
+                cmd.push_str(&format!(" w {}", target));
+                return cmd;
+            }
         }
     }
 

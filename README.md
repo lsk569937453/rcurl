@@ -17,7 +17,7 @@
 - Verbose mode for debugging (-v, -vv)
 - Request timing breakdown (--time)
 - Proxy support (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY)
-- Quick commands: ping, disk, telnet, DNS lookup
+- Quick commands: ping, disk, telnet, DNS lookup, WHOIS
 - Interactive mode with request history
 
 ## Installation on Linux (Quick Start)
@@ -137,6 +137,14 @@ rcurl p 8.8.8.8          # Shorthand
 rcurl ns google.com
 ```
 
+**WHOIS lookup for domain information:**
+
+```bash
+rcurl whois google.com
+rcurl w example.com      # Shorthand
+rcurl whois 8.8.8.8       # IP lookup
+```
+
 **Check disk size:**
 
 ```bash
@@ -189,6 +197,7 @@ Below is a complete list of available command-line options:
 | `disk`  | `d`       | `<path>`  | Check disk size for a path.      |
 | `telnet`| `t`       | `<host> <port>` | Telnet to a host and port.  |
 | `ns`    |           | `<domain>`| DNS lookup (like dig).          |
+| `whois` | `w`       | `<target>` | WHOIS lookup for domain/IP info. |
 
 ### Proxy Support
 

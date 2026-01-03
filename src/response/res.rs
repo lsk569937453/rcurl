@@ -11,4 +11,5 @@ pub enum RcurlResponse {
     DiskSize(()),
     Telnet(()),
     Dns(()),
+    Whois(()),
 }

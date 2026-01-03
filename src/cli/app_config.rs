@@ -30,6 +30,12 @@ pub enum QuickCommand {
         /// Domain name to query
         domain: String,
     },
+    /// WHOIS lookup for domain registration information
+    #[command(alias = "w")]
+    Whois {
+        /// Domain name or IP to query
+        target: String,
+    },
 }
 
 #[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
@@ -75,6 +81,8 @@ Quick Commands:
   rcurl t 192.168.1.1 23                     # Telnet with shorthand
   rcurl ns google.com                         # DNS lookup (like dig)
   rcurl ns www.example.com                    # DNS query with shorthand
+  rcurl whois google.com                      # WHOIS lookup
+  rcurl w example.com                         # WHOIS with shorthand
 
 Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {
@@ -148,7 +156,7 @@ pub struct Cli {
     /// Show timing information for request phases
     #[arg(long = "time")]
     pub time: bool,
-    /// Quick command (ping, disk, or their shorthands p, d)
+    /// Quick command (ping, disk, telnet, ns, whois, and their shorthands)
     #[command(subcommand)]
     pub quick_cmd: Option<QuickCommand>,
 }

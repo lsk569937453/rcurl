@@ -15,6 +15,7 @@ mod http;
 mod ping;
 mod response;
 mod telnet;
+mod whois;
 
 #[tokio::main]
 async fn main() {
