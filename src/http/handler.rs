@@ -4,6 +4,7 @@ use crate::http::proxy::{
     HttpForwardProxyConnector, HttpProxyConnector, get_proxy_from_env, should_bypass_proxy,
 };
 use crate::tls::rcurl_cert_verifier::RcurlCertVerifier;
+use crate::timing::RequestTimings;
 use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use form_data_builder::FormData;
@@ -30,7 +31,7 @@ use std::io::Write as WriteStd;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tower_service::Service;
 use url::Url;
@@ -43,13 +44,22 @@ pub async fn http_request_with_redirects(
     let url_str = cli.url.as_ref().ok_or(anyhow!("URL is required"))?;
     let mut current_url: Url = url_str.parse().context("Failed to parse initial URL")?;
 
+    // Initialize timings if --time flag is set
+    let mut timings = if cli.time {
+        let mut t = RequestTimings::new();
+        t.start_total();
+        Some(t)
+    } else {
+        None
+    };
+
     for i in 0..MAX_REDIRECTS {
         let uri: Uri = current_url.to_string().parse()?;
         let scheme = uri.scheme_str().unwrap_or("http");
 
         let request = build_request(&cli, &uri)?;
 
-        let res = send_request(&cli, request, scheme).await?;
+        let res = send_request(&cli, request, scheme, &mut timings).await?;
 
         let status = res.status();
         if status.is_redirection() {
@@ -69,7 +79,7 @@ pub async fn http_request_with_redirects(
             }
         }
 
-        return handle_response(&cli, res).await;
+        return handle_response(&cli, res, timings).await;
     }
 
     Err(anyhow!(
@@ -195,15 +205,16 @@ async fn send_request(
     cli: &Cli,
     request: Request<Full<Bytes>>,
     scheme: &str,
+    timings: &mut Option<RequestTimings>,
 ) -> Result<Response<Incoming>, anyhow::Error> {
     let uri = request.uri();
     let host = uri.host().map(|h| h.to_string());
 
     let fut = async {
         if scheme == "https" {
-            send_https_request(cli, request, host.as_deref()).await
+            send_https_request(cli, request, host.as_deref(), timings).await
         } else {
-            send_http_request(cli, request).await
+            send_http_request(cli, request, timings).await
         }
     };
     let res = timeout(Duration::from_secs(30), fut)
@@ -226,7 +237,13 @@ async fn send_https_request(
     cli: &Cli,
     request: Request<Full<Bytes>>,
     host: Option<&str>,
+    timings: &mut Option<RequestTimings>,
 ) -> Result<Response<Incoming>, anyhow::Error> {
+    let tls_start = Instant::now();
+    if let Some(t) = timings {
+        t.start_tls();
+    }
+
     let mut root_store = RootCertStore::empty();
     if let Some(file_path) = cli.certificate_path_option.as_ref() {
         let f = std::fs::File::open(file_path)?;
@@ -286,14 +303,26 @@ async fn send_https_request(
         let https_client: Client<_, Full<Bytes>> =
             Client::builder(TokioExecutor::new()).build(https_connector);
         let response = https_client.request(request).await?;
+
+        if let Some(t) = timings {
+            t.end_tls();
+        }
+
         return Ok(response);
     }
 
-    // Direct connection
+    // Direct connection - use resolver with timing
     let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
         .with_tls_config(tls_config)
         .https_or_http();
-    let resolver = DnsLoggingResolver::new();
+
+    let (resolver, timings_arc) = if cli.time {
+        DnsLoggingResolver::with_timings()
+    } else {
+        let r = DnsLoggingResolver::new();
+        (r, Arc::new(std::sync::Mutex::new(None)))
+    };
+
     let mut connector = HttpConnector::new_with_resolver(resolver);
     connector.enforce_http(false);
 
@@ -310,12 +339,52 @@ async fn send_https_request(
     let https_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(https_connector);
     let response = https_client.request(request).await?;
-    return Ok(response);
+
+    // Update timings from DNS resolver
+    if cli.time {
+        let dns_timings = timings_arc.lock().unwrap().clone();
+        if let Some(ref dt) = dns_timings {
+            if let Some(dns_duration) = dt.dns_duration() {
+                if let Some(t) = timings {
+                    if t.dns_start.is_none() {
+                        t.dns_start = dt.dns_start;
+                    }
+                    if t.dns_end.is_none() {
+                        t.dns_end = dt.dns_end;
+                    }
+                }
+            }
+
+            // Calculate estimated TCP connect time (total connection time minus DNS)
+            let total_connect_time = tls_start.elapsed();
+            if let Some(dns_time) = dt.dns_duration() {
+                if total_connect_time > dns_time {
+                    let tcp_duration = total_connect_time - dns_time;
+                    // This is an estimate: TCP connect happens between DNS and TLS
+                    if let Some(t) = timings {
+                        if t.tcp_connect_start.is_none() {
+                            t.tcp_connect_start = t.dns_end;
+                        }
+                        if t.tcp_connect_end.is_none() {
+                            t.tcp_connect_end = Some(t.dns_end.unwrap() + tcp_duration);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(t) = timings {
+            t.end_tls();
+        }
+    }
+
+    Ok(response)
 }
 use futures::FutureExt;
 async fn send_http_request(
     cli: &Cli,
     mut request: Request<Full<Bytes>>,
+    timings: &mut Option<RequestTimings>,
 ) -> Result<Response<Incoming>, anyhow::Error> {
     let uri = request.uri();
     let host = uri.host();
@@ -349,12 +418,50 @@ async fn send_http_request(
         return Ok(resp);
     }
 
-    // Direct connection
-    let resolver = DnsLoggingResolver::new();
+    // Direct connection - use resolver with timing
+    let (resolver, timings_arc) = if cli.time {
+        DnsLoggingResolver::with_timings()
+    } else {
+        let r = DnsLoggingResolver::new();
+        (r, Arc::new(std::sync::Mutex::new(None)))
+    };
+
     let connector = HttpConnector::new_with_resolver(resolver);
     let http_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(connector);
     let resp = http_client.request(request).await?;
+
+    // Update timings from DNS resolver
+    if cli.time {
+        let dns_timings = timings_arc.lock().unwrap().clone();
+        if let Some(ref dt) = dns_timings {
+            if let Some(t) = timings {
+                if t.dns_start.is_none() {
+                    t.dns_start = dt.dns_start;
+                }
+                if t.dns_end.is_none() {
+                    t.dns_end = dt.dns_end;
+                }
+            }
+
+            // For HTTP, TCP connect happens right after DNS
+            if let Some(t) = timings {
+                if let Some(dns_end) = t.dns_end {
+                    if t.tcp_connect_start.is_none() {
+                        t.tcp_connect_start = Some(dns_end);
+                    }
+                    if t.tcp_connect_end.is_none() {
+                        // Estimate TCP connect time as similar to DNS time (rough estimate)
+                        let estimated_tcp_duration = dt
+                            .dns_duration()
+                            .unwrap_or(std::time::Duration::from_millis(10));
+                        t.tcp_connect_end = Some(dns_end + estimated_tcp_duration);
+                    }
+                }
+            }
+        }
+    }
+
     Ok(resp)
 }
 
@@ -399,7 +506,16 @@ async fn download_file_with_progress(
 pub async fn handle_response(
     cli: &Cli,
     res: Response<Incoming>,
+    mut timings: Option<RequestTimings>,
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
+    // End total timing and display timing info if --time flag is set
+    if cli.time {
+        if let Some(ref mut t) = timings {
+            t.end_total();
+            println!("{}", t);
+        }
+    }
+
     if cli.header_option {
         info!("{:?} {}", res.version(), res.status());
         for (key, value) in res.headers().iter() {

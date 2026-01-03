@@ -42,6 +42,8 @@ pub enum QuickCommand {
   rcurl -v http://example.com                 # Verbose mode (debug level)
   rcurl -vv https://example.com               # More verbose (trace level)
   rcurl -o output.html http://example.com     # Save output to file
+  rcurl https://example.com --time            # Show timing breakdown
+  rcurl http://example.com --time --noproxy   # Timing without proxy
   rcurl ftp://ftp.example.com                 # FTP request
   rcurl ftps://ftp.example.com                # FTPS (FTP over TLS)
   rcurl sftp://sftp.example.com               # SFTP (SSH File Transfer)
@@ -143,6 +145,9 @@ pub struct Cli {
     /// Disable use of proxy
     #[arg(long = "noproxy")]
     pub noproxy: bool,
+    /// Show timing information for request phases
+    #[arg(long = "time")]
+    pub time: bool,
     /// Quick command (ping, disk, or their shorthands p, d)
     #[command(subcommand)]
     pub quick_cmd: Option<QuickCommand>,
