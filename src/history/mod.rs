@@ -98,6 +98,10 @@ pub fn command_from_cli(cli: &Cli) -> String {
                 cmd.push_str(&format!(" t {} {}", host, port));
                 return cmd;
             }
+            QuickCommand::Ns { domain } => {
+                cmd.push_str(&format!(" ns {}", domain));
+                return cmd;
+            }
         }
     }
 
@@ -183,19 +187,20 @@ pub fn command_from_cli(cli: &Cli) -> String {
 
 // 添加 dirs crate 的小模块
 mod dirs {
-    use std::path::PathBuf;
     use std::env;
+    use std::path::PathBuf;
 
     pub fn home_dir() -> Option<PathBuf> {
         if cfg!(windows) {
-            env::var("USERPROFILE").ok().map(PathBuf::from)
-                .or_else(|| env::var("HOMEDRIVE").ok().and_then(|drive| {
+            env::var("USERPROFILE").ok().map(PathBuf::from).or_else(|| {
+                env::var("HOMEDRIVE").ok().and_then(|drive| {
                     env::var("HOMEPATH").ok().map(|path| {
                         let mut p = PathBuf::from(drive);
                         p.push(path);
                         p
                     })
-                }))
+                })
+            })
         } else {
             env::var("HOME").ok().map(PathBuf::from)
         }

@@ -1,5 +1,6 @@
 use crate::cli::app_config::{Cli, QuickCommand};
 use crate::disk::handler::disk_size_command;
+use crate::dns::handler::dns_command;
 use crate::ftp::handler::ftp_request;
 use crate::history::{command_from_cli, load_history, save_request};
 use crate::http::handler::http_request_with_redirects;
@@ -111,6 +112,9 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
             }
             QuickCommand::Telnet { host, port } => {
                 telnet_command(host.clone(), *port, cli).await
+            }
+            QuickCommand::Ns { domain } => {
+                dns_command(domain.clone(), cli).await
             }
         };
     }

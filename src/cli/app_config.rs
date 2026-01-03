@@ -24,6 +24,12 @@ pub enum QuickCommand {
         /// Port to connect
         port: u16,
     },
+    /// DNS lookup (like dig)
+    #[command(alias = "ns")]
+    Ns {
+        /// Domain name to query
+        domain: String,
+    },
 }
 
 #[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
@@ -65,6 +71,8 @@ Quick Commands:
   rcurl d /home                               # Check disk size for specific path (shorthand)
   rcurl telnet example.com 80                 # Telnet to host:port
   rcurl t 192.168.1.1 23                     # Telnet with shorthand
+  rcurl ns google.com                         # DNS lookup (like dig)
+  rcurl ns www.example.com                    # DNS query with shorthand
 
 Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {
