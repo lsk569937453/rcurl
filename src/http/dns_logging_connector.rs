@@ -10,7 +10,7 @@ use tower_service::Service;
 
 #[derive(Clone, Debug)]
 pub struct DnsLoggingResolver {
-    pub timings: Arc<std::sync::Mutex<Option<crate::timing::RequestTimings>>>,
+    pub timings: Arc<std::sync::Mutex<Option<crate::http::timing::RequestTimings>>>,
 }
 
 impl DnsLoggingResolver {
@@ -20,7 +20,7 @@ impl DnsLoggingResolver {
         }
     }
 
-    pub fn with_timings() -> (Self, Arc<std::sync::Mutex<Option<crate::timing::RequestTimings>>>) {
+    pub fn with_timings() -> (Self, Arc<std::sync::Mutex<Option<crate::http::timing::RequestTimings>>>) {
         let timings = Arc::new(std::sync::Mutex::new(None));
         (
             Self {
@@ -37,7 +37,7 @@ impl DnsLoggingResolver {
     pub fn start_dns(&self) {
         let mut timings = self.timings.lock().unwrap();
         if timings.is_none() {
-            *timings = Some(crate::timing::RequestTimings::new());
+            *timings = Some(crate::http::timing::RequestTimings::new());
         }
         if let Some(ref mut t) = *timings {
             t.start_dns();

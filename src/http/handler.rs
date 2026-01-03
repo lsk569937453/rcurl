@@ -3,8 +3,8 @@ use crate::http::dns_logging_connector::DnsLoggingResolver;
 use crate::http::proxy::{
     HttpForwardProxyConnector, HttpProxyConnector, get_proxy_from_env, should_bypass_proxy,
 };
+use crate::http::timing::RequestTimings;
 use crate::tls::rcurl_cert_verifier::RcurlCertVerifier;
-use crate::timing::RequestTimings;
 use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use form_data_builder::FormData;
