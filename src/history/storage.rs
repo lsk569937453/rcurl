@@ -1,10 +1,9 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use super::types::HistoryEntry;
 use super::dirs;
+use super::types::HistoryEntry;
 
 /// 获取历史记录文件路径
 pub fn get_history_file_path() -> PathBuf {

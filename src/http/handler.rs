@@ -459,11 +459,11 @@ pub async fn handle_response(
     mut timings: Option<RequestTimings>,
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
     // End total timing and display timing info if --time flag is set
-    if cli.time {
-        if let Some(ref mut t) = timings {
-            t.end_total();
-            println!("{}", t);
-        }
+    if cli.time
+        && let Some(ref mut t) = timings
+    {
+        t.end_total();
+        println!("{}", t);
     }
 
     if cli.header_option {
@@ -501,10 +501,10 @@ pub async fn handle_response(
 
         let body_bytes = incoming.collect().await?.to_bytes();
 
-        if let Some(length) = content_length {
-            if length > 1024 * 1024 * 100 {
-                return Err(anyhow!("Binary output can mess up your terminal..."));
-            }
+        if let Some(length) = content_length
+            && length > 1024 * 1024 * 100
+        {
+            return Err(anyhow!("Binary output can mess up your terminal..."));
         }
 
         match String::from_utf8(body_bytes.to_vec()) {

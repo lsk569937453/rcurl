@@ -123,8 +123,8 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
         let scheme_str = scheme_string.as_str();
         let s = match scheme_str {
             "http" | "https" => {
-                let http_parts = http_request_with_redirects(cli).await?;
-                RcurlResponse::Http(http_parts)
+                let _http_parts = http_request_with_redirects(cli).await?;
+                RcurlResponse::Http(())
             }
             "ftp" | "ftps" | "sftp" => {
                 ftp_request(cli, scheme_str).await?;
