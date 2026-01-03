@@ -1,6 +1,5 @@
 use crate::cli::app_config::Cli;
 use crate::response::res::RcurlResponse;
-use anyhow::Context;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rayon::prelude::*;

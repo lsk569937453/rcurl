@@ -1,10 +1,8 @@
 use crate::cli::app_config::Cli;
 use crate::response::res::RcurlResponse;
 use chrono::Local;
-use hickory_resolver::Resolver;
 use hickory_resolver::TokioResolver;
-use hickory_resolver::config::ResolverConfig;
-use hickory_resolver::config::ResolverOpts;
+
 use hickory_resolver::lookup::Lookup;
 use hickory_resolver::name_server::TokioConnectionProvider;
 use std::time::Instant;

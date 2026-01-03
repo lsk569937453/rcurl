@@ -73,7 +73,7 @@ pub fn get_proxy_from_env(scheme: &str) -> Option<String> {
             .ok()
     }?;
 
-    eprintln!("* Proxy env var found for {}: {}", scheme, env_var);
+    println!("* Proxy env var found for {}: {}", scheme, env_var);
 
     // Parse the proxy URL to extract host and port
     if let Ok(url) = url::Url::parse(&env_var) {

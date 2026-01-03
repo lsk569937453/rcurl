@@ -2,16 +2,17 @@ use crate::cli::app_config::{Cli, QuickCommand};
 use crate::disk::handler::disk_size_command;
 use crate::dns::handler::dns_command;
 use crate::ftp::handler::ftp_request;
-use crate::history::{command_from_cli, load_history, save_request};
+use crate::history::command::command_from_cli;
+use crate::history::storage::load_history;
+use crate::history::storage::save_request;
 use crate::http::handler::http_request_with_redirects;
 use crate::ping::handler::ping_command;
 use crate::response::res::RcurlResponse;
 use crate::telnet::handler::telnet_command;
 use clap::Parser;
 use tracing::Level;
-use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
-
+use tracing_subscriber::fmt::format::FmtSpan;
 pub async fn main_with_error() -> Result<RcurlResponse, anyhow::Error> {
     let cli: Cli = Cli::parse();
 
@@ -104,18 +105,10 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
     // Handle quick commands
     if let Some(ref cmd) = cli.quick_cmd {
         return match cmd {
-            QuickCommand::Ping { target } => {
-                ping_command(target.clone(), cli).await
-            }
-            QuickCommand::Disk { target } => {
-                disk_size_command(target.clone(), cli).await
-            }
-            QuickCommand::Telnet { host, port } => {
-                telnet_command(host.clone(), *port, cli).await
-            }
-            QuickCommand::Ns { domain } => {
-                dns_command(domain.clone(), cli).await
-            }
+            QuickCommand::Ping { target } => ping_command(target.clone(), cli).await,
+            QuickCommand::Disk { target } => disk_size_command(target.clone(), cli).await,
+            QuickCommand::Telnet { host, port } => telnet_command(host.clone(), *port, cli).await,
+            QuickCommand::Ns { domain } => dns_command(domain.clone(), cli).await,
         };
     }
 
