@@ -4,6 +4,7 @@ use crate::http::proxy::{
     HttpForwardProxyConnector, HttpProxyConnector, get_proxy_from_env, should_bypass_proxy,
 };
 use crate::http::timing::RequestTimings;
+use crate::tls::info::get_tls_info;
 use crate::tls::rcurl_cert_verifier::RcurlCertVerifier;
 use anyhow::{Context, anyhow};
 use bytes::Bytes;
@@ -239,6 +240,38 @@ async fn send_https_request(
     host: Option<&str>,
     timings: &mut Option<RequestTimings>,
 ) -> Result<Response<Incoming>, anyhow::Error> {
+    // Get TLS info and/or cert info before the request
+    if cli.tls_info || cli.cert_info {
+        if let Some(host) = host {
+            let uri = request.uri();
+            let port = uri.port_u16().unwrap_or(443);
+
+            match get_tls_info(
+                host,
+                port,
+                cli.skip_certificate_validate,
+                cli.certificate_path_option.as_ref(),
+            )
+            .await
+            {
+                Ok((tls_info, cert_info)) => {
+                    if cli.tls_info {
+                        println!("{}", tls_info);
+                    }
+                    if cli.cert_info {
+                        if let Some(cert) = cert_info {
+                            println!("{}", cert);
+                        } else {
+                            println!("No certificate information available");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to get TLS info: {}", e);
+                }
+            }
+        }
+    }
     let connection_start = Instant::now();
 
     let mut root_store = RootCertStore::empty();

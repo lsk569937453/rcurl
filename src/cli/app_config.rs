@@ -72,6 +72,11 @@ Debug Levels:
   -v   verbose (debug level)
   -vv  more verbose (trace level)
 
+TLS/Certificate Information:
+  rcurl https://example.com --tls-info       # Show TLS handshake info
+  rcurl https://example.com --cert-info      # Show certificate details
+  rcurl https://example.com --tls-info --cert-info  # Show both
+
 Quick Commands:
   rcurl ping google.com                       # Ping a host
   rcurl p 8.8.8.8                             # Ping an IP address (shorthand)
@@ -156,6 +161,12 @@ pub struct Cli {
     /// Show timing information for request phases
     #[arg(long = "time")]
     pub time: bool,
+    /// Show TLS handshake information
+    #[arg(long = "tls-info")]
+    pub tls_info: bool,
+    /// Show TLS certificate information
+    #[arg(long = "cert-info")]
+    pub cert_info: bool,
     /// Quick command (ping, disk, telnet, ns, whois, and their shorthands)
     #[command(subcommand)]
     pub quick_cmd: Option<QuickCommand>,
