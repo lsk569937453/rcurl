@@ -4,7 +4,7 @@ use std::io::{self, BufRead, Write};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-use telnet::Telnet;
+use telnet::{Action, Event, Telnet};
 use tokio::task;
 
 pub async fn telnet_command(
@@ -12,115 +12,98 @@ pub async fn telnet_command(
     port: u16,
     _cli: Cli,
 ) -> Result<RcurlResponse, anyhow::Error> {
-    // Run telnet in blocking task since telnet library is synchronous
     task::spawn_blocking(move || run_telnet(host, port)).await?
 }
 
 fn run_telnet(host: String, port: u16) -> Result<RcurlResponse, anyhow::Error> {
-    // Connect to telnet server
     let addr = format!("{}:{}", host, port);
-    println!("Connecting To {}...", host);
-    let mut telnet = Telnet::connect(addr.as_str(), 256).map_err(|_e| {
-        anyhow!(
-            "Could not open connection to the host, on port {}: Connect failed",
-            port
-        )
-    })?;
+    println!("Connecting to {}...", addr);
 
-    println!("Trying {}...", addr);
-    println!("Connected to {}.", addr);
-    println!("Escape character is '^]'.");
-    println!();
+    let mut telnet = Telnet::connect(addr.as_str(), 256)?;
+    println!("Connected. Escape character is '^]'.\n");
 
-    // Create a channel for sending user input to the telnet thread
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
 
-    // Spawn thread to handle stdin and send to telnet via channel
+    // stdin thread
     let stdin_thread = thread::spawn(move || {
         let stdin = io::stdin();
-        let mut stdin_lock = stdin.lock();
+        let mut stdin = stdin.lock();
         let mut input = String::new();
 
         loop {
             input.clear();
-            match stdin_lock.read_line(&mut input) {
-                Ok(0) => {
-                    // EOF - send empty signal to quit
-                    let _ = tx.send(vec![]);
-                    break;
-                }
-                Ok(_) => {
-                    let trimmed = input.trim();
-                    if trimmed == "quit" || trimmed == "exit" {
-                        // Send quit signal
-                        let _ = tx.send(vec![]);
-                        break;
-                    } else if !trimmed.is_empty() {
-                        // Send user input with CRLF
-                        let mut command = trimmed.as_bytes().to_vec();
-                        command.extend_from_slice(b"\r\n");
-                        if tx.send(command).is_err() {
-                            break;
-                        }
-                    }
-                }
-                Err(_e) => {
-                    // Error reading stdin
-                    let _ = tx.send(vec![]);
-                    break;
-                }
+            if stdin.read_line(&mut input).ok() == Some(0) {
+                let _ = tx.send(vec![]);
+                break;
+            }
+
+            let line = input.trim_end_matches(&['\r', '\n'][..]);
+
+            if line == "quit" || line == "exit" {
+                let _ = tx.send(vec![]);
+                break;
+            }
+
+            let mut buf = line.as_bytes().to_vec();
+            buf.extend_from_slice(b"\r\n");
+            if tx.send(buf).is_err() {
+                break;
             }
         }
     });
 
-    // Main thread handles telnet I/O
-    println!("Type commands and press Enter. Type 'quit' or 'exit' to close.");
-    println!();
+    println!("Type commands and press Enter.\n");
 
+    // 🔥 正确的 telnet 主循环
     loop {
-        // Try to read from telnet server (with timeout via try_read pattern)
-        match telnet.read() {
-            Ok(event) => {
-                match event {
-                    telnet::Event::Data(data) => {
-                        // Server sent data - display it
-                        let text = String::from_utf8_lossy(&data);
-                        print!("{}", text);
-                        io::stdout().flush().ok();
+        // ✅ 非阻塞读取 telnet
+        match telnet.read_nonblocking() {
+            Ok(event) => match event {
+                Event::Data(data) => {
+                    print!("{}", String::from_utf8_lossy(&data));
+                    io::stdout().flush().ok();
+                }
+
+                // Telnet 协商（必须处理）
+                Event::Negotiation(action, option) => match action {
+                    Action::Do => {
+                        let _ = telnet.negotiate(&Action::Wont, option);
                     }
-                    telnet::Event::TimedOut => {
-                        // Timeout waiting for data, check for user input
-                    }
-                    telnet::Event::NoData => {
-                        // No data available, check for user input
+                    Action::Will => {
+                        let _ = telnet.negotiate(&Action::Dont, option);
                     }
                     _ => {}
+                },
+
+                Event::Subnegotiation(_, _) => {}
+                Event::TimedOut | Event::NoData => {}
+                Event::UnknownIAC(_) => {}
+                Event::Error(e) => {
+                    eprintln!("Telnet error: {}", e);
+                    break;
                 }
-            }
-            Err(_e) => {
-                // Connection error
-                println!("\nConnection lost.");
+            },
+            Err(e) => {
+                eprintln!("Read error: {}", e);
                 break;
             }
         }
 
-        // Check for user input from channel (non-blocking)
-        if let Ok(command) = rx.try_recv() {
-            if command.is_empty() {
-                // Quit signal received
-                println!("\nClosing connection...");
-                break;
+        // stdin → telnet
+        match rx.try_recv() {
+            Ok(buf) => {
+                if buf.is_empty() {
+                    break;
+                }
+                let _ = telnet.write(&buf);
             }
-            // Send user input to telnet server
-            telnet.write(&command).ok();
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => break,
         }
 
-        // Small sleep to prevent busy-waiting
         thread::sleep(Duration::from_millis(10));
     }
 
-    // Wait for stdin thread to finish
     let _ = stdin_thread.join();
-
     Ok(RcurlResponse::Telnet(()))
 }
