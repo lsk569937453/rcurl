@@ -1,6 +1,6 @@
 [package]
 name = "cargo-rcurl"
-version = "0.0.30"
+version = "0.0.31"
 edition = "2024"
 description = "A modern, feature-rich curl alternative written in Rust"
 license = "MIT"
@@ -8,6 +8,9 @@ repository = "https://github.com/lsk569937453/rcurl"
 homepage = "https://github.com/lsk569937453/rcurl"
 documentation = "https://docs.rs/cargo-rcurl"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "rcurl"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "=1.0.100"
