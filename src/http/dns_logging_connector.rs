@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::task::{Context as OtherContext, Poll};
 use std::vec;
 use tower_service::Service;
+
 #[derive(Clone, Debug)]
 pub struct DnsLoggingResolver;
 
@@ -29,7 +30,7 @@ impl Service<Name> for DnsLoggingResolver {
             debug!("Resolving DNS for: {}", &host_clone_for_log);
             let addrs_iter =
                 tokio::task::spawn_blocking(move || (host, 0).to_socket_addrs()).await??;
-            info!("Resolved DNS for {}: {:?}", &host_clone_for_log, addrs_iter);
+            debug!("Resolved DNS for {}: {:?}", &host_clone_for_log, addrs_iter);
 
             let addresses: Vec<_> = addrs_iter.collect();
 

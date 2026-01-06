@@ -6,15 +6,19 @@
 
 ## Features
 
-- Support for HTTP/1.1, HTTP/2, and HTTP/2 with prior knowledge.
-- Customizable HTTP methods (GET, POST, etc.).
-- Sending custom request body and form data.
-- Custom headers, user-agent, cookies, and referrer.
-- User authentication.
-- Support for PEM certificates and insecure connections.
-- File downloads and uploads.
-- Byte range support.
-- Verbose mode for debugging.
+- Support for HTTP/1.1, HTTP/2, and HTTP/2 with prior knowledge
+- Customizable HTTP methods (GET, POST, etc.)
+- Sending custom request body and form data
+- Custom headers, user-agent, cookies, and referrer
+- User authentication
+- Support for PEM certificates and insecure connections
+- File downloads and uploads
+- Byte range support
+- Verbose mode for debugging (-v, -vv)
+- Request timing breakdown (--time)
+- Proxy support (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY)
+- Quick commands: ping, disk, telnet, DNS lookup, WHOIS
+- Interactive mode with request history
 
 ## Installation on Linux (Quick Start)
 
@@ -40,6 +44,8 @@ cargo install --path .
 ## Usage
 
 ### Examples
+
+#### HTTP/HTTPS Requests
 
 **Make a simple GET request:**
 
@@ -83,13 +89,83 @@ rcurl -A "MyCoolBrowser/1.0" http://httpbin.org/user-agent
 rcurl -r 0-1023 http://example.com/file.zip -o partial_file.zip
 ```
 
+**Show request timing breakdown:**
+
+```bash
+rcurl https://example.com --time
+```
+
+**Verbose mode for debugging:**
+
+```bash
+rcurl -v http://example.com          # Debug level
+rcurl -vv https://example.com        # Trace level
+```
+
+#### FTP/FTPS/SFTP
+
+**FTP request:**
+
+```bash
+rcurl ftp://ftp.example.com
+```
+
+**FTPS (FTP over TLS):**
+
+```bash
+rcurl ftps://ftp.example.com
+```
+
+**SFTP with authentication:**
+
+```bash
+rcurl -u user:pass ftp://ftp.example.com
+```
+
+#### Quick Commands
+
+**Ping a host:**
+
+```bash
+rcurl ping google.com
+rcurl p 8.8.8.8          # Shorthand
+```
+
+**DNS lookup (like dig):**
+
+```bash
+rcurl ns google.com
+```
+
+**WHOIS lookup for domain information:**
+
+```bash
+rcurl whois google.com
+rcurl w example.com      # Shorthand
+rcurl whois 8.8.8.8       # IP lookup
+```
+
+**Check disk size:**
+
+```bash
+rcurl disk .             # Current directory
+rcurl d /home            # Specific path (shorthand)
+```
+
+**Telnet to a host:port:**
+
+```bash
+rcurl telnet example.com 80
+rcurl t 192.168.1.1 23   # Shorthand
+```
+
 ### Options
 
 Below is a complete list of available command-line options:
 
 | Short | Long                        | Argument          | Description                                |
 | :---- | :-------------------------- | :---------------- | :----------------------------------------- |
-|       |                             | `url`             | The request URL (required).                |
+|       |                             | `url`             | The request URL.                           |
 | `-X`  | `--request`                 | `<method>`        | Specify request method to use.             |
 | `-d`  | `--data`                    | `<data>`          | HTTP POST data.                            |
 | `-F`  | `--form`                    | `<name=content>`  | Specify multipart MIME data.               |
@@ -105,11 +181,55 @@ Below is a complete list of available command-line options:
 | `-k`  | `--insecure`                |                   | Allow insecure server connections.         |
 | `-I`  | `--head`                    |                   | Show document info only.                   |
 | `-r`  | `--range`                   | `<range>`         | Retrieve only the bytes within RANGE.      |
-| `-v`  | `--verbose`                 |                   | Make the operation more talkative.         |
+| `-v`  | `--verbose`                 |                   | Verbose mode (-v for debug, -vv for trace).|
 |       | `--http2`                   |                   | Use HTTP/2.                                |
 |       | `--http2-prior-knowledge`   |                   | Use HTTP/2 with prior knowledge.           |
+|       | `--noproxy`                 |                   | Disable use of proxy.                      |
+|       | `--time`                    |                   | Show timing information for request phases.|
 | `-h`  | `--help`                    |                   | Print help information.                    |
 | `-V`  | `--version`                 |                   | Print version information.                 |
+
+#### Quick Commands
+
+| Command | Shorthand | Argument | Description                      |
+| :------ | :-------- | :------- | :------------------------------- |
+| `ping`  | `p`       | `<target>` | Ping a host to check connectivity.|
+| `disk`  | `d`       | `<path>`  | Check disk size for a path.      |
+| `telnet`| `t`       | `<host> <port>` | Telnet to a host and port.  |
+| `ns`    |           | `<domain>`| DNS lookup (like dig).          |
+| `whois` | `w`       | `<target>` | WHOIS lookup for domain/IP info. |
+
+### Proxy Support
+
+Set environment variables to use proxy:
+
+```bash
+# Unix/Linux/MacOS
+export ALL_PROXY=http://127.0.0.1:7890
+export HTTPS_PROXY=http://127.0.0.1:7890
+export HTTP_PROXY=http://127.0.0.1:7890
+export NO_PROXY=example.com,localhost
+
+# Windows CMD
+set ALL_PROXY=http://127.0.0.1:7890
+
+# Windows PowerShell
+$env:ALL_PROXY='http://127.0.0.1:7890'
+```
+
+Disable proxy for a single request:
+
+```bash
+rcurl https://example.com --noproxy
+```
+
+### Interactive Mode
+
+When no URL or command is provided, `rcurl` enters interactive mode, allowing you to select and execute previous requests from history:
+
+```bash
+rcurl
+```
 
 ## Contributing
 

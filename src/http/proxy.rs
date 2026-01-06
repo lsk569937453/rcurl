@@ -1,91 +1,47 @@
-use anyhow::anyhow;
-use hyper_util::rt::TokioIo;
 use hyper::Uri;
 use hyper_util::client::legacy::connect::HttpConnector;
-use std::future::Future;
-use std::pin::Pin;
+use hyper_util::client::legacy::connect::proxy::Tunnel;
+use hyper_util::rt::TokioIo;
+
 use std::task::{Context, Poll};
 use tokio::net::TcpStream;
 use tower_service::Service;
 
+/// HTTPS proxy connector using hyper-util's official Tunnel implementation.
+///
+/// This connector uses the HTTP CONNECT method to establish a tunnel through
+/// an HTTP proxy for HTTPS traffic.
 #[derive(Clone)]
 pub struct HttpProxyConnector {
-    pub proxy_addr: String,
-    direct: HttpConnector,
+    inner: Tunnel<HttpConnector>,
 }
 
 impl HttpProxyConnector {
+    /// Create a new HTTPS proxy connector using hyper-util's official Tunnel.
+    ///
+    /// # Arguments
+    /// * `proxy_addr` - The proxy address in format "host:port" (e.g., "127.0.0.1:7890")
     pub fn new(proxy_addr: String) -> Self {
+        let proxy_dst = format!("http://{}", proxy_addr).parse().unwrap_or_default();
         let mut http = HttpConnector::new();
         http.enforce_http(false);
         Self {
-            proxy_addr,
-            direct: http,
+            inner: Tunnel::new(proxy_dst, http),
         }
     }
 }
 
 impl Service<Uri> for HttpProxyConnector {
-    type Response = TokioIo<TcpStream>;
-    type Error = anyhow::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Response = <Tunnel<HttpConnector> as Service<Uri>>::Response;
+    type Error = <Tunnel<HttpConnector> as Service<Uri>>::Error;
+    type Future = <Tunnel<HttpConnector> as Service<Uri>>::Future;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, uri: Uri) -> Self::Future {
-        let proxy = self.proxy_addr.clone();
-
-        Box::pin(async move {
-            let host = uri.host().ok_or(anyhow!("missing host"))?;
-            let port = uri.port_u16().unwrap_or(443);
-
-            // 1. 连接代理
-            let mut stream = TcpStream::connect(&proxy).await?;
-
-            // 2. 发送 CONNECT
-            let req = format!(
-                "CONNECT {}:{} HTTP/1.1\r\n\
-                 Host: {}:{}\r\n\
-                 Proxy-Connection: Keep-Alive\r\n\r\n",
-                host, port, host, port
-            );
-
-            tokio::io::AsyncWriteExt::write_all(&mut stream, req.as_bytes()).await?;
-
-            // 3. 读取响应直到空行（headers 结束）
-            let mut response_buf = Vec::new();
-            let mut header_buf = [0u8; 1];
-
-            loop {
-                let n = tokio::io::AsyncReadExt::read(&mut stream, &mut header_buf).await?;
-                if n == 0 {
-                    return Err(anyhow!("proxy connection closed unexpectedly"));
-                }
-
-                let byte = header_buf[0];
-                response_buf.push(byte);
-
-                // 检查是否到达 header 结束标记 (\r\n\r\n)
-                let len = response_buf.len();
-                if len >= 4 {
-                    if &response_buf[len - 4..] == b"\r\n\r\n" {
-                        break;
-                    }
-                }
-            }
-
-            let resp = std::str::from_utf8(&response_buf)?;
-
-            if !resp.starts_with("HTTP/1.1 200") && !resp.starts_with("HTTP/1.0 200") {
-                return Err(anyhow!("proxy CONNECT failed: {}", resp));
-            }
-
-            eprintln!("* CONNECT response: {}", resp.lines().next().unwrap_or(""));
-
-            Ok(TokioIo::new(stream))
-        })
+    fn call(&mut self, req: Uri) -> Self::Future {
+        self.inner.call(req)
     }
 }
 
@@ -117,7 +73,7 @@ pub fn get_proxy_from_env(scheme: &str) -> Option<String> {
             .ok()
     }?;
 
-    eprintln!("* Proxy env var found for {}: {}", scheme, env_var);
+    println!("* Proxy env var found for {}: {}", scheme, env_var);
 
     // Parse the proxy URL to extract host and port
     if let Ok(url) = url::Url::parse(&env_var) {
@@ -192,11 +148,12 @@ impl HttpForwardProxyConnector {
         Self { proxy_addr }
     }
 }
+use futures::future::BoxFuture;
 
 impl Service<Uri> for HttpForwardProxyConnector {
     type Response = TokioIo<TcpStream>;
     type Error = anyhow::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

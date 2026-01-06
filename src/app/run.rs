@@ -1,13 +1,19 @@
-use crate::cli::app_config::Cli;
+use crate::cli::app_config::{Cli, QuickCommand};
+use crate::disk::handler::disk_size_command;
+use crate::dns::handler::dns_command;
 use crate::ftp::handler::ftp_request;
-use crate::history::{command_from_cli, load_history, save_request};
+use crate::history::command::command_from_cli;
+use crate::history::storage::load_history;
+use crate::history::storage::save_request;
 use crate::http::handler::http_request_with_redirects;
+use crate::ping::handler::ping_command;
 use crate::response::res::RcurlResponse;
+use crate::telnet::handler::telnet_command;
+use crate::whois::handler::whois_command;
 use clap::Parser;
 use tracing::Level;
-use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
-
+use tracing_subscriber::fmt::format::FmtSpan;
 pub async fn main_with_error() -> Result<RcurlResponse, anyhow::Error> {
     let cli: Cli = Cli::parse();
 
@@ -15,8 +21,8 @@ pub async fn main_with_error() -> Result<RcurlResponse, anyhow::Error> {
 }
 
 async fn do_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
-    // 如果没有 URL，进入交互模式
-    if cli.url.is_none() {
+    // 如果没有 URL 且没有命令，进入交互模式
+    if cli.url.is_none() && cli.quick_cmd.is_none() {
         return interactive_mode().await;
     }
 
@@ -86,11 +92,29 @@ async fn interactive_mode() -> Result<RcurlResponse, anyhow::Error> {
     // 初始化日志
     init_logging(cli.verbosity);
 
-    // 执行请求（不保存历史，避免重复保存）
+    // 保存请求到历史（将选中的命令移到顶部）
+    let command = command_from_cli(&cli);
+    if let Err(e) = save_request(&command, &cli) {
+        eprintln!("Warning: Failed to save request history: {}", e);
+    }
+
+    // 执行请求
     execute_request(cli).await
 }
 
 async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
+    // Handle quick commands
+    if let Some(ref cmd) = cli.quick_cmd {
+        return match cmd {
+            QuickCommand::Ping { target } => ping_command(target.clone(), cli).await,
+            QuickCommand::Disk { target } => disk_size_command(target.clone(), cli).await,
+            QuickCommand::Telnet { host, port } => telnet_command(host.clone(), *port, cli).await,
+            QuickCommand::Ns { domain } => dns_command(domain.clone(), cli).await,
+            QuickCommand::Whois { target } => whois_command(target.clone(), cli).await,
+        };
+    }
+
+    // Default URL-based behavior
     let url = cli.url.clone().unwrap_or_default();
     let uri: hyper::Uri = url.parse()?;
 
@@ -99,8 +123,8 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
         let scheme_str = scheme_string.as_str();
         let s = match scheme_str {
             "http" | "https" => {
-                let http_parts = http_request_with_redirects(cli).await?;
-                RcurlResponse::Http(http_parts)
+                let _http_parts = http_request_with_redirects(cli).await?;
+                RcurlResponse::Http(())
             }
             "ftp" | "ftps" | "sftp" => {
                 ftp_request(cli, scheme_str).await?;

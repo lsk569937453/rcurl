@@ -1,5 +1,42 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
+
+#[derive(Subcommand, Serialize, Deserialize, Debug, Clone)]
+pub enum QuickCommand {
+    /// Ping a host to check connectivity
+    #[command(alias = "p")]
+    Ping {
+        /// Host to ping (domain or IP address)
+        target: String,
+    },
+    /// Check disk size for a path
+    #[command(alias = "d")]
+    Disk {
+        /// Path to check (default: current directory)
+        #[arg(default_value = ".")]
+        target: String,
+    },
+    /// Telnet to a host and port
+    #[command(alias = "t")]
+    Telnet {
+        /// Host to connect (domain or IP address)
+        host: String,
+        /// Port to connect
+        port: u16,
+    },
+    /// DNS lookup (like dig)
+    #[command(alias = "ns")]
+    Ns {
+        /// Domain name to query
+        domain: String,
+    },
+    /// WHOIS lookup for domain registration information
+    #[command(alias = "w")]
+    Whois {
+        /// Domain name or IP to query
+        target: String,
+    },
+}
 
 #[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
 #[command(author, version, about, long_about, after_help = "Examples:
@@ -11,6 +48,8 @@ use serde::{Deserialize, Serialize};
   rcurl -v http://example.com                 # Verbose mode (debug level)
   rcurl -vv https://example.com               # More verbose (trace level)
   rcurl -o output.html http://example.com     # Save output to file
+  rcurl https://example.com --time            # Show timing breakdown
+  rcurl http://example.com --time --noproxy   # Timing without proxy
   rcurl ftp://ftp.example.com                 # FTP request
   rcurl ftps://ftp.example.com                # FTPS (FTP over TLS)
   rcurl sftp://sftp.example.com               # SFTP (SSH File Transfer)
@@ -32,6 +71,23 @@ Proxy Support:
 Debug Levels:
   -v   verbose (debug level)
   -vv  more verbose (trace level)
+
+TLS/Certificate Information:
+  rcurl https://example.com --tls-info       # Show TLS handshake info
+  rcurl https://example.com --cert-info      # Show certificate details
+  rcurl https://example.com --tls-info --cert-info  # Show both
+
+Quick Commands:
+  rcurl ping google.com                       # Ping a host
+  rcurl p 8.8.8.8                             # Ping an IP address (shorthand)
+  rcurl disk .                                # Check disk size (current directory)
+  rcurl d /home                               # Check disk size for specific path (shorthand)
+  rcurl telnet example.com 80                 # Telnet to host:port
+  rcurl t 192.168.1.1 23                     # Telnet with shorthand
+  rcurl ns google.com                         # DNS lookup (like dig)
+  rcurl ns www.example.com                    # DNS query with shorthand
+  rcurl whois google.com                      # WHOIS lookup
+  rcurl w example.com                         # WHOIS with shorthand
 
 Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {
@@ -102,4 +158,16 @@ pub struct Cli {
     /// Disable use of proxy
     #[arg(long = "noproxy")]
     pub noproxy: bool,
+    /// Show timing information for request phases
+    #[arg(long = "time")]
+    pub time: bool,
+    /// Show TLS handshake information
+    #[arg(long = "tls-info")]
+    pub tls_info: bool,
+    /// Show TLS certificate information
+    #[arg(long = "cert-info")]
+    pub cert_info: bool,
+    /// Quick command (ping, disk, telnet, ns, whois, and their shorthands)
+    #[command(subcommand)]
+    pub quick_cmd: Option<QuickCommand>,
 }

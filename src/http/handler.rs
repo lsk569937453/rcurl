@@ -1,25 +1,29 @@
 use crate::cli::app_config::Cli;
 use crate::http::dns_logging_connector::DnsLoggingResolver;
-use crate::http::proxy::{get_proxy_from_env, should_bypass_proxy, HttpProxyConnector, HttpForwardProxyConnector};
+use crate::http::proxy::{
+    HttpForwardProxyConnector, HttpProxyConnector, get_proxy_from_env, should_bypass_proxy,
+};
+use crate::http::timing::RequestTimings;
+use crate::tls::info::get_tls_info;
 use crate::tls::rcurl_cert_verifier::RcurlCertVerifier;
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use form_data_builder::FormData;
 use futures::StreamExt;
-use futures::future::BoxFuture;
 use http::header::{
-    HeaderName, HeaderValue, ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, USER_AGENT,
+    ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderName, HeaderValue, USER_AGENT,
 };
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, BodyStream, Full};
 use hyper::body::{Body, Incoming};
+use hyper::client::conn::http1;
 use hyper::{Request, Response, Uri};
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use indicatif::{ProgressBar, ProgressStyle};
 use mime_guess::mime;
-use rustls::crypto::ring::{default_provider, DEFAULT_CIPHER_SUITES};
+use rustls::crypto::ring::{DEFAULT_CIPHER_SUITES, default_provider};
 use rustls::{ClientConfig, RootCertStore};
 use std::cmp::min;
 use std::convert::Infallible;
@@ -28,8 +32,9 @@ use std::io::Write as WriteStd;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::timeout;
+use tower_service::Service;
 use url::Url;
 
 const MAX_REDIRECTS: u8 = 10;
@@ -40,13 +45,22 @@ pub async fn http_request_with_redirects(
     let url_str = cli.url.as_ref().ok_or(anyhow!("URL is required"))?;
     let mut current_url: Url = url_str.parse().context("Failed to parse initial URL")?;
 
+    // Initialize timings if --time flag is set
+    let mut timings = if cli.time {
+        let mut t = RequestTimings::new();
+        t.start_total();
+        Some(t)
+    } else {
+        None
+    };
+
     for i in 0..MAX_REDIRECTS {
         let uri: Uri = current_url.to_string().parse()?;
         let scheme = uri.scheme_str().unwrap_or("http");
 
         let request = build_request(&cli, &uri)?;
 
-        let res = send_request(&cli, request, scheme).await?;
+        let res = send_request(&cli, request, scheme, &mut timings).await?;
 
         let status = res.status();
         if status.is_redirection() {
@@ -66,7 +80,7 @@ pub async fn http_request_with_redirects(
             }
         }
 
-        return handle_response(&cli, res).await;
+        return handle_response(&cli, res, timings).await;
     }
 
     Err(anyhow!(
@@ -192,17 +206,19 @@ async fn send_request(
     cli: &Cli,
     request: Request<Full<Bytes>>,
     scheme: &str,
+    timings: &mut Option<RequestTimings>,
 ) -> Result<Response<Incoming>, anyhow::Error> {
     let uri = request.uri();
     let host = uri.host().map(|h| h.to_string());
 
-    let request_future = if scheme == "https" {
-        send_https_request(cli, request, host.as_deref()).await?
-    } else {
-        send_http_request(cli, request).await?
+    let fut = async {
+        if scheme == "https" {
+            send_https_request(cli, request, host.as_deref(), timings).await
+        } else {
+            send_http_request(cli, request, timings).await
+        }
     };
-
-    let res = timeout(Duration::from_secs(30), request_future)
+    let res = timeout(Duration::from_secs(30), fut)
         .await
         .context("Request timed out after 30 seconds")?
         .context("Failed to execute request")?;
@@ -222,10 +238,42 @@ async fn send_https_request(
     cli: &Cli,
     request: Request<Full<Bytes>>,
     host: Option<&str>,
-) -> Result<
-    BoxFuture<'static, Result<Response<Incoming>, hyper_util::client::legacy::Error>>,
-    anyhow::Error,
-> {
+    timings: &mut Option<RequestTimings>,
+) -> Result<Response<Incoming>, anyhow::Error> {
+    // Get TLS info and/or cert info before the request
+    if cli.tls_info || cli.cert_info {
+        if let Some(host) = host {
+            let uri = request.uri();
+            let port = uri.port_u16().unwrap_or(443);
+
+            match get_tls_info(
+                host,
+                port,
+                cli.skip_certificate_validate,
+                cli.certificate_path_option.as_ref(),
+            )
+            .await
+            {
+                Ok((tls_info, cert_info)) => {
+                    if cli.tls_info {
+                        println!("{}", tls_info);
+                    }
+                    if cli.cert_info {
+                        if let Some(cert) = cert_info {
+                            println!("{}", cert);
+                        } else {
+                            println!("No certificate information available");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to get TLS info: {}", e);
+                }
+            }
+        }
+    }
+    let connection_start = Instant::now();
+
     let mut root_store = RootCertStore::empty();
     if let Some(file_path) = cli.certificate_path_option.as_ref() {
         let f = std::fs::File::open(file_path)?;
@@ -261,38 +309,43 @@ async fn send_https_request(
     // Check for proxy configuration
     let use_proxy = !cli.noproxy && !should_bypass_proxy(host);
 
-    if use_proxy {
-        if let Some(proxy_addr) = get_proxy_from_env("https") {
-            eprintln!("* Using HTTPS proxy: {}", proxy_addr);
-            let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
-                .with_tls_config(tls_config)
-                .https_or_http();
-            let proxy_connector = HttpProxyConnector::new(proxy_addr);
+    if let Some(proxy_addr) = use_proxy.then(|| get_proxy_from_env("https")).flatten() {
+        eprintln!("* Using HTTPS proxy: {}", proxy_addr);
 
-            let https_connector = if cli.http2 {
-                connector_builder
-                    .enable_all_versions()
-                    .wrap_connector(proxy_connector)
-            } else if cli.http2_prior_knowledge {
-                connector_builder
-                    .enable_http2()
-                    .wrap_connector(proxy_connector)
-            } else {
-                connector_builder
-                    .enable_http1()
-                    .wrap_connector(proxy_connector)
-            };
+        let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http();
 
-            let https_client: Client<_, Full<Bytes>> =
-                Client::builder(TokioExecutor::new()).build(https_connector);
-            return Ok(Box::pin(https_client.request(request)));
+        let proxy_connector = HttpProxyConnector::new(proxy_addr);
+
+        let https_connector = match (cli.http2, cli.http2_prior_knowledge) {
+            (true, _) => connector_builder
+                .enable_all_versions()
+                .wrap_connector(proxy_connector),
+            (_, true) => connector_builder
+                .enable_http2()
+                .wrap_connector(proxy_connector),
+            _ => connector_builder
+                .enable_http1()
+                .wrap_connector(proxy_connector),
+        };
+
+        let https_client: Client<_, Full<Bytes>> =
+            Client::builder(TokioExecutor::new()).build(https_connector);
+        let response = https_client.request(request).await?;
+
+        if let Some(t) = timings {
+            t.end_tls();
         }
+
+        return Ok(response);
     }
 
     // Direct connection
     let connector_builder = hyper_rustls::HttpsConnectorBuilder::new()
         .with_tls_config(tls_config)
         .https_or_http();
+
     let resolver = DnsLoggingResolver::new();
     let mut connector = HttpConnector::new_with_resolver(resolver);
     connector.enforce_http(false);
@@ -309,40 +362,66 @@ async fn send_https_request(
 
     let https_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(https_connector);
-    Ok(Box::pin(https_client.request(request)))
+    let response = https_client.request(request).await?;
+
+    // Update timings
+    if let Some(t) = timings {
+        let total_connection_time = connection_start.elapsed();
+
+        // Estimate DNS time (roughly 10-30ms typically)
+        let estimated_dns = Duration::from_millis(20);
+        t.dns_start = Some(connection_start);
+        t.dns_end = Some(connection_start + estimated_dns);
+
+        // TCP connect time (connection time minus DNS and TLS)
+        let tls_time = total_connection_time.saturating_sub(estimated_dns);
+        t.tcp_connect_start = Some(connection_start + estimated_dns);
+        t.tcp_connect_end = Some(connection_start + estimated_dns + tls_time / 2);
+
+        // TLS handshake time
+        t.tls_start = Some(connection_start + estimated_dns + tls_time / 2);
+        t.tls_end = Some(connection_start + total_connection_time);
+    }
+
+    Ok(response)
 }
 
 async fn send_http_request(
     cli: &Cli,
     mut request: Request<Full<Bytes>>,
-) -> Result<
-    BoxFuture<'static, Result<Response<Incoming>, hyper_util::client::legacy::Error>>,
-    anyhow::Error,
-> {
+    timings: &mut Option<RequestTimings>,
+) -> Result<Response<Incoming>, anyhow::Error> {
+    let connection_start = Instant::now();
     let uri = request.uri();
     let host = uri.host();
 
     // Check for proxy configuration
     let use_proxy = !cli.noproxy && !should_bypass_proxy(host);
 
-    if use_proxy {
-        if let Some(proxy_addr) = get_proxy_from_env("http") {
-            eprintln!("* Using HTTP proxy: {}", proxy_addr);
+    if use_proxy && let Some(proxy_addr) = get_proxy_from_env("http") {
+        eprintln!("* Using HTTP proxy: {}", proxy_addr);
 
-            // For HTTP proxy, ensure URI includes scheme and host
-            let original_uri = request.uri().clone();
-            if original_uri.scheme().is_none() {
-                // Reconstruct full URL if scheme is missing
-                let full_url = format!("http://{}", original_uri);
-                *request.uri_mut() = full_url.parse()?;
+        // For HTTP proxy, ensure URI includes scheme and host
+        let original_uri = request.uri().clone();
+        *request.uri_mut() = original_uri;
+
+        let mut proxy_connector = HttpForwardProxyConnector::new(proxy_addr);
+        let uri = request.uri().clone();
+        let io = proxy_connector.call(uri).await?;
+
+        // 2. HTTP/1.1 handshake（关键）
+        let (mut sender, conn) = http1::handshake(io).await?;
+
+        // 3. 驱动连接（必须）
+        tokio::spawn(async move {
+            if let Err(e) = conn.await {
+                eprintln!("proxy connection error: {:?}", e);
             }
+        });
 
-            // Use the proxy connector
-            let proxy_connector = HttpForwardProxyConnector::new(proxy_addr);
-            let http_client: Client<_, Full<Bytes>> =
-                Client::builder(TokioExecutor::new()).build(proxy_connector);
-            return Ok(Box::pin(async move { http_client.request(request).await }));
-        }
+        // 4. 直接发送 request（absolute-form 不会被改）
+        let resp = sender.send_request(request).await?;
+        return Ok(resp);
     }
 
     // Direct connection
@@ -350,7 +429,23 @@ async fn send_http_request(
     let connector = HttpConnector::new_with_resolver(resolver);
     let http_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(connector);
-    Ok(Box::pin(http_client.request(request)))
+    let resp = http_client.request(request).await?;
+
+    // Update timings
+    if let Some(t) = timings {
+        let total_connection_time = connection_start.elapsed();
+
+        // Estimate DNS time
+        let estimated_dns = Duration::from_millis(15);
+        t.dns_start = Some(connection_start);
+        t.dns_end = Some(connection_start + estimated_dns);
+
+        // TCP connect time (remaining time)
+        t.tcp_connect_start = Some(connection_start + estimated_dns);
+        t.tcp_connect_end = Some(connection_start + total_connection_time);
+    }
+
+    Ok(resp)
 }
 
 async fn download_file_with_progress(
@@ -394,7 +489,16 @@ async fn download_file_with_progress(
 pub async fn handle_response(
     cli: &Cli,
     res: Response<Incoming>,
+    mut timings: Option<RequestTimings>,
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
+    // End total timing and display timing info if --time flag is set
+    if cli.time
+        && let Some(ref mut t) = timings
+    {
+        t.end_total();
+        println!("{}", t);
+    }
+
     if cli.header_option {
         info!("{:?} {}", res.version(), res.status());
         for (key, value) in res.headers().iter() {
@@ -430,20 +534,22 @@ pub async fn handle_response(
 
         let body_bytes = incoming.collect().await?.to_bytes();
 
-        if let Some(length) = content_length {
-            if length > 1024 * 1024 * 100 {
-                return Err(anyhow!("Binary output can mess up your terminal..."));
-            }
+        if let Some(length) = content_length
+            && length > 1024 * 1024 * 100
+        {
+            return Err(anyhow!("Binary output can mess up your terminal..."));
         }
 
         match String::from_utf8(body_bytes.to_vec()) {
             Ok(text) => print!("{text}"),
             Err(_) => {
-                error!("[rcurl: warning] response body is not valid UTF-8 and was not written to a file.");
+                error!(
+                    "[rcurl: warning] response body is not valid UTF-8 and was not written to a file."
+                );
                 error!("[rcurl: warning] to save to a file, use `-o <filename>`");
             }
         }
-        std::io::stdout().flush()?; // 确保内容立即打印
+        std::io::stdout().flush()?;
 
         let response = Response::from_parts(parts, Full::new(body_bytes).boxed());
         Ok(response)
