@@ -167,6 +167,12 @@ pub struct Cli {
     /// Show TLS certificate information
     #[arg(long = "cert-info")]
     pub cert_info: bool,
+    /// Show TLS handshake information in JSON format
+    #[arg(long = "tls-info-json")]
+    pub tls_info_json: bool,
+    /// Show TLS certificate information in JSON format
+    #[arg(long = "cert-info-json")]
+    pub cert_info_json: bool,
     /// Quick command (ping, disk, telnet, ns, whois, and their shorthands)
     #[command(subcommand)]
     pub quick_cmd: Option<QuickCommand>,

@@ -241,43 +241,55 @@ async fn send_https_request(
     timings: &mut Option<RequestTimings>,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     // Get TLS info and/or cert info before the request
-    if cli.tls_info || cli.cert_info {
-        if let Some(host) = host {
-            let uri = request.uri();
-            let port = uri.port_u16().unwrap_or(443);
+    if (cli.tls_info || cli.cert_info || cli.tls_info_json || cli.cert_info_json)
+        && let Some(host) = host
+    {
+        let uri = request.uri();
+        let port = uri.port_u16().unwrap_or(443);
 
-            match get_tls_info(
-                host,
-                port,
-                cli.skip_certificate_validate,
-                cli.certificate_path_option.as_ref(),
-            )
-            .await
-            {
-                Ok((tls_info, cert_info)) => {
-                    if cli.tls_info {
-                        println!("{}", tls_info);
-                    }
-                    if cli.cert_info {
-                        if let Some(cert) = cert_info {
-                            println!("{}", cert);
-                        } else {
-                            println!("No certificate information available");
-                        }
-                    }
-                    // Return early - no HTTP request needed when showing TLS/cert info
-                    let empty_body = Response::builder().body(
-                        Full::new(Bytes::from(""))
-                            .map_err(|e| anyhow!("{}", e))
-                            .boxed(),
-                    )?;
+        match get_tls_info(
+            host,
+            port,
+            cli.skip_certificate_validate,
+            cli.certificate_path_option.as_ref(),
+        )
+        .await
+        {
+            Ok((tls_info, cert_info)) => {
+                // Handle JSON output for TLS info
+                if cli.tls_info_json {
+                    println!("{}", serde_json::to_string_pretty(&tls_info)?);
+                } else if cli.tls_info {
+                    println!("{}", tls_info);
+                }
 
-                    return Ok(empty_body);
+                // Handle JSON output for cert info
+                if cli.cert_info_json {
+                    if let Some(ref cert) = cert_info {
+                        let cert_json = cert.to_json_format(host);
+                        println!("{}", serde_json::to_string_pretty(&cert_json)?);
+                    } else {
+                        println!("null");
+                    }
+                } else if cli.cert_info {
+                    if let Some(cert) = cert_info {
+                        println!("{}", cert);
+                    } else {
+                        println!("No certificate information available");
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Failed to get TLS info: {}", e);
-                    return Err(e);
-                }
+                // Return early - no HTTP request needed when showing TLS/cert info
+                let empty_body = Response::builder().body(
+                    Full::new(Bytes::from(""))
+                        .map_err(|e| anyhow!("{}", e))
+                        .boxed(),
+                )?;
+
+                return Ok(empty_body);
+            }
+            Err(e) => {
+                eprintln!("Failed to get TLS info: {}", e);
+                return Err(e);
             }
         }
     }

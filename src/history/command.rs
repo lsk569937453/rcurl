@@ -110,6 +110,22 @@ pub fn command_from_cli(cli: &Cli) -> String {
         cmd.push_str(" --time");
     }
 
+    if cli.tls_info {
+        cmd.push_str(" --tls-info");
+    }
+
+    if cli.cert_info {
+        cmd.push_str(" --cert-info");
+    }
+
+    if cli.tls_info_json {
+        cmd.push_str(" --tls-info-json");
+    }
+
+    if cli.cert_info_json {
+        cmd.push_str(" --cert-info-json");
+    }
+
     if let Some(ref url) = cli.url {
         cmd.push(' ');
         cmd.push_str(url);
