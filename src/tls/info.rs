@@ -1,7 +1,9 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use pki_types::ServerName;
 use rustls::crypto::ring::{DEFAULT_CIPHER_SUITES, default_provider};
 use rustls::{ClientConfig, RootCertStore};
+use serde::Serialize;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -9,7 +11,7 @@ use tokio_rustls::TlsConnector;
 use x509_parser::parse_x509_certificate;
 
 /// TLS connection information
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct TlsInfo {
     pub tls_version: String,
     pub cipher_suite: String,
@@ -17,7 +19,7 @@ pub struct TlsInfo {
 }
 
 /// Certificate information
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CertificateInfo {
     pub subject: String,
     pub issuer: String,
@@ -28,6 +30,95 @@ pub struct CertificateInfo {
     pub key_size: Option<usize>,
     pub signature_algorithm: String,
     pub public_key_algorithm: String,
+}
+
+/// Certificate information for JSON output with additional fields
+#[derive(Debug, Serialize)]
+pub struct CertificateInfoJson {
+    pub host: String,
+    pub issuer: String,
+    pub not_before: String,
+    pub not_after: String,
+    pub days_left: i64,
+    pub status: String,
+    #[serde(flatten)]
+    pub base: CertificateInfo,
+}
+
+impl CertificateInfo {
+    /// Convert to JSON format with additional fields
+    pub fn to_json_format(&self, host: &str) -> CertificateInfoJson {
+        // Parse the validity dates
+        let not_before_dt = self.parse_date(&self.validity_not_before);
+        let not_after_dt = self.parse_date(&self.validity_not_after);
+
+        // Format dates as ISO 8601
+        let not_before = not_before_dt.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let not_after = not_after_dt.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+        // Calculate days left
+        let now = Utc::now();
+        let days_left = (not_after_dt - now).num_days();
+
+        // Determine status
+        let status = if days_left < 0 {
+            "EXPIRED".to_string()
+        } else if days_left < 30 {
+            "EXPIRING_SOON".to_string()
+        } else {
+            "OK".to_string()
+        };
+
+        // Extract simplified issuer name (get the common name or organization)
+        let issuer_simple = self.extract_simple_issuer();
+
+        CertificateInfoJson {
+            host: host.to_string(),
+            issuer: issuer_simple,
+            not_before,
+            not_after,
+            days_left,
+            status,
+            base: self.clone(),
+        }
+    }
+
+    fn parse_date(&self, date_str: &str) -> DateTime<Utc> {
+        // Try parsing the x509 date format
+        if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
+            return dt.with_timezone(&Utc);
+        }
+        // Try parsing other common formats
+        if let Ok(dt) = DateTime::parse_from_str(date_str, "%b %d %H:%M:%S %Y %z") {
+            return dt.with_timezone(&Utc);
+        }
+        // Fallback: try parsing without timezone
+        if let Ok(dt) = DateTime::parse_from_str(&format!("{} +0000", date_str), "%b %d %H:%M:%S %Y %z") {
+            return dt.with_timezone(&Utc);
+        }
+        // Default to current time if parsing fails
+        Utc::now()
+    }
+
+    fn extract_simple_issuer(&self) -> String {
+        // Try to extract CN (Common Name) or O (Organization) from issuer
+        if self.issuer.contains("CN=") {
+            if let Some(cn_part) = self.issuer.split("CN=").nth(1) {
+                if let Some(cn) = cn_part.split(',').next() {
+                    return cn.trim().to_string();
+                }
+            }
+        }
+        if self.issuer.contains("O=") {
+            if let Some(o_part) = self.issuer.split("O=").nth(1) {
+                if let Some(org) = o_part.split(',').next() {
+                    return org.trim().to_string();
+                }
+            }
+        }
+        // Fallback to full issuer string
+        self.issuer.clone()
+    }
 }
 
 impl std::fmt::Display for TlsInfo {

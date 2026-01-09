@@ -33,7 +33,17 @@ chmod +x ./rcurl
 
 ## Installation
 
-Ensure you have Rust and Cargo installed. You can install `rcurl` by cloning this repository and building it with Cargo:
+### Install via Cargo
+
+If you have Rust and Cargo installed, you can install `rcurl` directly from crates.io:
+
+```bash
+cargo install cargo-rcurl
+```
+
+### Build from Source
+
+Alternatively, you can install `rcurl` by cloning this repository and building it with Cargo:
 
 ```bash
 git clone https://github.com/lsk569937453/rcurl.git

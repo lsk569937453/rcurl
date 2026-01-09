@@ -14,7 +14,7 @@ use http::header::{
     ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderName, HeaderValue, USER_AGENT,
 };
 use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, BodyStream, Full};
+use http_body_util::{BodyExt, BodyStream, Empty, Full};
 use hyper::body::{Body, Incoming};
 use hyper::client::conn::http1;
 use hyper::{Request, Response, Uri};
@@ -207,7 +207,7 @@ async fn send_request(
     request: Request<Full<Bytes>>,
     scheme: &str,
     timings: &mut Option<RequestTimings>,
-) -> Result<Response<Incoming>, anyhow::Error> {
+) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let uri = request.uri();
     let host = uri.host().map(|h| h.to_string());
 
@@ -239,36 +239,57 @@ async fn send_https_request(
     request: Request<Full<Bytes>>,
     host: Option<&str>,
     timings: &mut Option<RequestTimings>,
-) -> Result<Response<Incoming>, anyhow::Error> {
+) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     // Get TLS info and/or cert info before the request
-    if cli.tls_info || cli.cert_info {
-        if let Some(host) = host {
-            let uri = request.uri();
-            let port = uri.port_u16().unwrap_or(443);
+    if (cli.tls_info || cli.cert_info || cli.tls_info_json || cli.cert_info_json)
+        && let Some(host) = host
+    {
+        let uri = request.uri();
+        let port = uri.port_u16().unwrap_or(443);
 
-            match get_tls_info(
-                host,
-                port,
-                cli.skip_certificate_validate,
-                cli.certificate_path_option.as_ref(),
-            )
-            .await
-            {
-                Ok((tls_info, cert_info)) => {
-                    if cli.tls_info {
-                        println!("{}", tls_info);
+        match get_tls_info(
+            host,
+            port,
+            cli.skip_certificate_validate,
+            cli.certificate_path_option.as_ref(),
+        )
+        .await
+        {
+            Ok((tls_info, cert_info)) => {
+                // Handle JSON output for TLS info
+                if cli.tls_info_json {
+                    println!("{}", serde_json::to_string_pretty(&tls_info)?);
+                } else if cli.tls_info {
+                    println!("{}", tls_info);
+                }
+
+                // Handle JSON output for cert info
+                if cli.cert_info_json {
+                    if let Some(ref cert) = cert_info {
+                        let cert_json = cert.to_json_format(host);
+                        println!("{}", serde_json::to_string_pretty(&cert_json)?);
+                    } else {
+                        println!("null");
                     }
-                    if cli.cert_info {
-                        if let Some(cert) = cert_info {
-                            println!("{}", cert);
-                        } else {
-                            println!("No certificate information available");
-                        }
+                } else if cli.cert_info {
+                    if let Some(cert) = cert_info {
+                        println!("{}", cert);
+                    } else {
+                        println!("No certificate information available");
                     }
                 }
-                Err(e) => {
-                    eprintln!("Failed to get TLS info: {}", e);
-                }
+                // Return early - no HTTP request needed when showing TLS/cert info
+                let empty_body = Response::builder().body(
+                    Full::new(Bytes::from(""))
+                        .map_err(|e| anyhow!("{}", e))
+                        .boxed(),
+                )?;
+
+                return Ok(empty_body);
+            }
+            Err(e) => {
+                eprintln!("Failed to get TLS info: {}", e);
+                return Err(e);
             }
         }
     }
@@ -332,7 +353,10 @@ async fn send_https_request(
 
         let https_client: Client<_, Full<Bytes>> =
             Client::builder(TokioExecutor::new()).build(https_connector);
-        let response = https_client.request(request).await?;
+        let response = https_client
+            .request(request)
+            .await?
+            .map(|item| item.map_err(|e| anyhow!("{}", e)).boxed());
 
         if let Some(t) = timings {
             t.end_tls();
@@ -362,7 +386,10 @@ async fn send_https_request(
 
     let https_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(https_connector);
-    let response = https_client.request(request).await?;
+    let response = https_client
+        .request(request)
+        .await?
+        .map(|item| item.map_err(|e| anyhow!("{}", e)).boxed());
 
     // Update timings
     if let Some(t) = timings {
@@ -390,7 +417,7 @@ async fn send_http_request(
     cli: &Cli,
     mut request: Request<Full<Bytes>>,
     timings: &mut Option<RequestTimings>,
-) -> Result<Response<Incoming>, anyhow::Error> {
+) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let connection_start = Instant::now();
     let uri = request.uri();
     let host = uri.host();
@@ -420,7 +447,10 @@ async fn send_http_request(
         });
 
         // 4. 直接发送 request（absolute-form 不会被改）
-        let resp = sender.send_request(request).await?;
+        let resp = sender
+            .send_request(request)
+            .await?
+            .map(|item| item.map_err(|e| anyhow!("{}", e)).boxed());
         return Ok(resp);
     }
 
@@ -429,7 +459,10 @@ async fn send_http_request(
     let connector = HttpConnector::new_with_resolver(resolver);
     let http_client: Client<_, Full<Bytes>> =
         Client::builder(TokioExecutor::new()).build(connector);
-    let resp = http_client.request(request).await?;
+    let resp = http_client
+        .request(request)
+        .await?
+        .map(|item| item.map_err(|e| anyhow!("{}", e)).boxed());
 
     // Update timings
     if let Some(t) = timings {
@@ -451,7 +484,7 @@ async fn send_http_request(
 async fn download_file_with_progress(
     file_path: &str,
     total_size: u64,
-    mut body_stream: BodyStream<Incoming>,
+    mut body_stream: BodyStream<BoxBody<Bytes, anyhow::Error>>,
 ) -> Result<(), anyhow::Error> {
     let mut file = OpenOptions::new()
         .write(true)
@@ -488,7 +521,7 @@ async fn download_file_with_progress(
 
 pub async fn handle_response(
     cli: &Cli,
-    res: Response<Incoming>,
+    res: Response<BoxBody<Bytes, anyhow::Error>>,
     mut timings: Option<RequestTimings>,
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, anyhow::Error> {
     // End total timing and display timing info if --time flag is set
