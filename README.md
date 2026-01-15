@@ -20,6 +20,30 @@
 - Quick commands: ping, disk, telnet, DNS lookup, WHOIS
 - Interactive mode with request history
 
+## rcurl vs curl
+
+rcurl is a modern reimagining of curl, built with Rust for enhanced safety, better developer experience, and extended functionality.
+
+| Feature | rcurl | curl |
+| :--- | :--- | :--- |
+| **Language** | Rust (Memory-safe, modern) | C (Legacy, manual memory management) |
+| **Core Functionality** | Full curl-compatible HTTP/S/FTP/SFTP | Full protocol support |
+| **Interactive Mode** | Request history & replay | Not available |
+| **Timing Analysis** | Multi-phase breakdown (DNS, TCP, TLS, etc.) | Basic time_total only |
+| **Network Diagnostics** | Built-in ping, DNS, whois, telnet | Requires external tools |
+| **Developer Experience** | Colored output, progress bars, cleaner CLI | Traditional Unix style |
+| **Quick Commands** | Shorthand aliases (p, d, t, w, ns) | Not available |
+| **HTTP/2 Support** | Native support | Native support |
+| **Distribution** | Single static binary (cargo/release) | System package / build from source |
+
+**Why choose rcurl?**
+
+- **Modern & Safe**: Built with Rust for memory safety and reliability, eliminating entire classes of security vulnerabilities
+- **Better DX**: Interactive mode with request history, colored output, and intuitive shortcuts for daily workflows
+- **Enhanced Insights**: Detailed timing breakdown (DNS lookup, TCP handshake, TLS negotiation, transfer) for performance debugging
+- **All-in-One**: Network diagnostics (ping, DNS, whois, telnet) integrated—no need to switch tools
+- **Drop-in Replacement**: Compatible with curl's most-used options while adding powerful new features
+
 ## Installation on Linux (Quick Start)
 
 For Linux users, the quickest way to get started is by downloading the pre-compiled binary directly from GitHub Releases. This method does not require you to have the Rust toolchain installed.
