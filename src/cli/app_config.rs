@@ -76,6 +76,8 @@ TLS/Certificate Information:
   rcurl https://example.com --tls-info       # Show TLS handshake info
   rcurl https://example.com --cert-info      # Show certificate details
   rcurl https://example.com --tls-info --cert-info  # Show both
+  rcurl https://example.com --tls-info-json  # Show TLS handshake info in JSON
+  rcurl https://example.com --cert-info-json # Show certificate details in JSON
 
 Quick Commands:
   rcurl ping google.com                       # Ping a host
