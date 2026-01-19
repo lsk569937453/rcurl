@@ -27,6 +27,18 @@ pub fn command_from_cli(cli: &Cli) -> String {
                 cmd.push_str(&format!(" w {}", target));
                 return cmd;
             }
+            QuickCommand::Port { port, kill } => {
+                if let Some(p) = port {
+                    if *kill {
+                        cmd.push_str(&format!(" port {} --kill", p));
+                    } else {
+                        cmd.push_str(&format!(" port {}", p));
+                    }
+                } else {
+                    cmd.push_str(" port");
+                }
+                return cmd;
+            }
         }
     }
 

@@ -17,7 +17,7 @@
 - Verbose mode for debugging (-v, -vv)
 - Request timing breakdown (--time)
 - Proxy support (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY)
-- Quick commands: ping, disk, telnet, DNS lookup, WHOIS
+- Quick commands: ping, disk, telnet, DNS lookup, WHOIS, port query
 - Interactive mode with request history
 
 ## rcurl vs curl
@@ -32,7 +32,7 @@ rcurl is a modern reimagining of curl, built with Rust for enhanced safety, bett
 | **Timing Analysis** | Multi-phase breakdown (DNS, TCP, TLS, etc.) | Basic time_total only |
 | **Network Diagnostics** | Built-in ping, DNS, whois, telnet | Requires external tools |
 | **Developer Experience** | Colored output, progress bars, cleaner CLI | Traditional Unix style |
-| **Quick Commands** | Shorthand aliases (p, d, t, w, ns) | Not available |
+| **Quick Commands** | Shorthand aliases (p, d, t, w, ns, l) | Not available |
 | **HTTP/2 Support** | Native support | Native support |
 | **Distribution** | Single static binary (cargo/release) | System package / build from source |
 
@@ -193,6 +193,25 @@ rcurl telnet example.com 80
 rcurl t 192.168.1.1 23   # Shorthand
 ```
 
+**Port query - list all listening ports:**
+
+```bash
+rcurl port                # List all listening ports
+rcurl l                   # Shorthand
+```
+
+**Port query - find process by port:**
+
+```bash
+rcurl port 8080           # Find process using port 8080
+```
+
+**Port query - kill process by port:**
+
+```bash
+rcurl port 3000 --kill    # Kill process using port 3000
+```
+
 ### Options
 
 Below is a complete list of available command-line options:
@@ -232,6 +251,7 @@ Below is a complete list of available command-line options:
 | `telnet`| `t`       | `<host> <port>` | Telnet to a host and port.  |
 | `ns`    |           | `<domain>`| DNS lookup (like dig).          |
 | `whois` | `w`       | `<target>` | WHOIS lookup for domain/IP info. |
+| `port`  | `l`       | `[port] [--kill]` | List/listening ports or find/kill process by port. |
 
 ### Proxy Support
 

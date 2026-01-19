@@ -36,6 +36,15 @@ pub enum QuickCommand {
         /// Domain name or IP to query
         target: String,
     },
+    /// Port query - list all listening ports or find/kill process by port
+    #[command(alias = "l")]
+    Port {
+        /// Port number to query (optional, if not specified lists all listening ports)
+        port: Option<u16>,
+        /// Kill the process using the specified port
+        #[arg(long)]
+        kill: bool,
+    },
 }
 
 #[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
@@ -90,6 +99,10 @@ Quick Commands:
   rcurl ns www.example.com                    # DNS query with shorthand
   rcurl whois google.com                      # WHOIS lookup
   rcurl w example.com                         # WHOIS with shorthand
+  rcurl port                                  # List all listening ports
+  rcurl l                                     # List all listening ports (shorthand)
+  rcurl port 8080                             # Find process using port 8080
+  rcurl port 3000 --kill                      # Kill process using port 3000
 
 Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {
