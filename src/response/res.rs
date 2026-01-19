@@ -7,4 +7,5 @@ pub enum RcurlResponse {
     Telnet(()),
     Dns(()),
     Whois(()),
+    Port(()),
 }

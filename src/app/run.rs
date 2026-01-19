@@ -7,6 +7,7 @@ use crate::history::storage::load_history;
 use crate::history::storage::save_request;
 use crate::http::handler::http_request_with_redirects;
 use crate::ping::handler::ping_command;
+use crate::port::handler::{port_find_command, port_kill_command, port_list_command};
 use crate::response::res::RcurlResponse;
 use crate::telnet::handler::telnet_command;
 use crate::whois::handler::whois_command;
@@ -111,6 +112,17 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
             QuickCommand::Telnet { host, port } => telnet_command(host.clone(), *port, cli).await,
             QuickCommand::Ns { domain } => dns_command(domain.clone(), cli).await,
             QuickCommand::Whois { target } => whois_command(target.clone(), cli).await,
+            QuickCommand::Port { port, kill } => {
+                if let Some(p) = port {
+                    if *kill {
+                        port_kill_command(*p, cli).await
+                    } else {
+                        port_find_command(*p, cli).await
+                    }
+                } else {
+                    port_list_command(cli).await
+                }
+            }
         };
     }
 

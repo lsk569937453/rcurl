@@ -13,6 +13,7 @@ mod dns;
 mod history;
 mod http;
 mod ping;
+mod port;
 mod response;
 mod telnet;
 mod whois;
