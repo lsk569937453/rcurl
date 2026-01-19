@@ -9,9 +9,9 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::sync::Arc;
-use suppaftp::types::FileType;
 use suppaftp::RustlsConnector;
 use suppaftp::RustlsFtpStream;
+use suppaftp::types::FileType;
 
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
