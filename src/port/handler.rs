@@ -1,127 +1,24 @@
 use crate::cli::app_config::Cli;
 use crate::response::res::RcurlResponse;
 use anyhow::anyhow;
-use std::process::Command;
+use sysinfo::{Pid, System};
 
 #[derive(Debug, Clone)]
 struct PortInfo {
     protocol: String,
     local_address: String,
-    foreign_address: String,
+    local_port: u16,
     state: String,
-    pid: String,
-}
-
-/// Parse netstat output on Windows
-fn parse_netstat_windows(output: &str) -> Vec<PortInfo> {
-    let mut ports = Vec::new();
-
-    for line in output.lines().skip(4) {
-        // Skip empty lines and header separators
-        if line.trim().is_empty() || line.trim().starts_with('-') {
-            continue;
-        }
-
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 5 {
-            let protocol = parts[0].to_string();
-            let local_address = parts[1].to_string();
-            let foreign_address = if parts.len() > 2 { parts[2].to_string() } else { "N/A".to_string() };
-            let state = if parts.len() > 3 { parts[3].to_string() } else { "N/A".to_string() };
-            let pid = if parts.len() > 4 { parts[4].to_string() } else { "N/A".to_string() };
-
-            // Only show LISTENING ports
-            if state.contains("LISTENING") {
-                ports.push(PortInfo {
-                    protocol,
-                    local_address,
-                    foreign_address,
-                    state,
-                    pid,
-                });
-            }
-        }
-    }
-
-    ports
-}
-
-/// Parse netstat output on Linux/Mac
-fn parse_netstat_unix(output: &str) -> Vec<PortInfo> {
-    let mut ports = Vec::new();
-
-    for line in output.lines() {
-        // Skip empty lines and headers
-        if line.trim().is_empty() || line.starts_with("Active") || line.starts_with("Proto") {
-            continue;
-        }
-
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 6 {
-            let protocol = parts[0].to_string();
-            let local_address = parts[3].to_string();
-            let foreign_address = parts[4].to_string();
-            let state = parts[5].to_string();
-            let pid = if parts.len() > 6 {
-                // Extract PID from "program/name"
-                parts[6].split('/').next().unwrap_or("N/A").to_string()
-            } else {
-                "N/A".to_string()
-            };
-
-            // Only show LISTEN ports
-            if state.contains("LISTEN") {
-                ports.push(PortInfo {
-                    protocol,
-                    local_address,
-                    foreign_address,
-                    state,
-                    pid,
-                });
-            }
-        }
-    }
-
-    ports
-}
-
-/// Get all listening ports
-fn get_listening_ports() -> Result<Vec<PortInfo>, anyhow::Error> {
-    let output = if cfg!(target_os = "windows") {
-        Command::new("netstat")
-            .args(&["-ano"])
-            .output()
-            .map_err(|e| anyhow!("Failed to execute netstat: {}", e))?
-    } else {
-        Command::new("netstat")
-            .args(&["-tulnp"])
-            .output()
-            .map_err(|e| anyhow!("Failed to execute netstat: {}", e))?
-    };
-
-    let output_str = String::from_utf8_lossy(&output.stdout);
-
-    let ports = if cfg!(target_os = "windows") {
-        parse_netstat_windows(&output_str)
-    } else {
-        parse_netstat_unix(&output_str)
-    };
-
-    Ok(ports)
+    pid: u32,
 }
 
 /// Find process ID by port number
-fn find_pid_by_port(port: u16) -> Result<Option<String>, anyhow::Error> {
+fn find_pid_by_port(port: u16) -> Result<Option<u32>, anyhow::Error> {
     let ports = get_listening_ports()?;
 
     for port_info in ports {
-        // Extract port number from local address (e.g., "0.0.0.0:8080" or "[::]:8080")
-        if let Some(pos) = port_info.local_address.rfind(':') {
-            if let Ok(port_num) = port_info.local_address[pos + 1..].parse::<u16>() {
-                if port_num == port {
-                    return Ok(Some(port_info.pid));
-                }
-            }
+        if port_info.local_port == port {
+            return Ok(Some(port_info.pid));
         }
     }
 
@@ -129,32 +26,202 @@ fn find_pid_by_port(port: u16) -> Result<Option<String>, anyhow::Error> {
 }
 
 /// Kill process by PID
-fn kill_process(pid: &str) -> Result<(), anyhow::Error> {
-    if pid == "N/A" || pid.is_empty() {
+fn kill_process(pid: u32) -> Result<(), anyhow::Error> {
+    if pid == 0 {
         return Err(anyhow!("Invalid PID"));
     }
 
-    let result = if cfg!(target_os = "windows") {
-        Command::new("taskkill")
-            .args(&["/F", "/PID", pid])
-            .output()
-    } else {
-        Command::new("kill")
-            .args(&["-9", pid])
-            .output()
-    };
+    let mut sys = System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
-    match result {
-        Ok(output) => {
-            if output.status.success() {
-                Ok(())
-            } else {
-                let error = String::from_utf8_lossy(&output.stderr);
-                Err(anyhow!("Failed to kill process: {}", error))
+    if let Some(process) = sys.process(Pid::from_u32(pid)) {
+        if process.kill() {
+            Ok(())
+        } else {
+            Err(anyhow!("Failed to kill process: {}", pid))
+        }
+    } else {
+        Err(anyhow!("Process not found: {}", pid))
+    }
+}
+
+// Windows implementation using netstat2
+#[cfg(windows)]
+mod windows_impl {
+    use super::PortInfo;
+    use anyhow::anyhow;
+    use netstat2::{ProtocolSocketInfo, TcpState};
+
+    pub fn get_listening_ports_windows() -> Result<Vec<PortInfo>, anyhow::Error> {
+        let mut ports = Vec::new();
+
+        // Use netstat2 to get socket information
+        let af_flags = netstat2::AddressFamilyFlags::IPV4 | netstat2::AddressFamilyFlags::IPV6;
+        let proto_flags = netstat2::ProtocolFlags::TCP | netstat2::ProtocolFlags::UDP;
+
+        let socket_info = netstat2::get_sockets_info(af_flags, proto_flags)
+            .map_err(|e| anyhow!("Failed to get socket info: {}", e))?;
+
+        for info in socket_info {
+            let apids = info.associated_pids;
+
+            // Check if this is a listening socket and extract port info
+            match info.protocol_socket_info {
+                ProtocolSocketInfo::Tcp(tcp_si) => {
+                    // Listening sockets have remote_port == 0 and state == Listen
+                    if tcp_si.local_port > 0 && tcp_si.remote_port == 0 && tcp_si.state == TcpState::Listen {
+                        ports.push(PortInfo {
+                            protocol: "TCP".to_string(),
+                            local_address: format!("{}", tcp_si.local_addr),
+                            local_port: tcp_si.local_port,
+                            state: format!("{:?}", tcp_si.state),
+                            pid: apids.first().copied().unwrap_or(0),
+                        });
+                    }
+                }
+                ProtocolSocketInfo::Udp(udp_si) => {
+                    // UDP sockets are always listening
+                    if udp_si.local_port > 0 {
+                        ports.push(PortInfo {
+                            protocol: "UDP".to_string(),
+                            local_address: format!("{}", udp_si.local_addr),
+                            local_port: udp_si.local_port,
+                            state: "LISTENING".to_string(),
+                            pid: apids.first().copied().unwrap_or(0),
+                        });
+                    }
+                }
             }
         }
-        Err(e) => Err(anyhow!("Failed to execute kill command: {}", e)),
+
+        Ok(ports)
     }
+}
+
+// Unix implementation (Linux/macOS)
+#[cfg(unix)]
+mod unix_impl {
+    use super::PortInfo;
+    use anyhow::anyhow;
+    use std::fs;
+    use std::path::Path;
+
+    fn hex_to_ip(hex: &str, is_v6: bool) -> String {
+        if is_v6 {
+            let hex_clean = hex.trim_start_matches('0').trim_start_matches("0000");
+            if hex_clean.is_empty() {
+                return "[::]".to_string();
+            }
+            let chars: Vec<char> = hex.chars().collect();
+            let mut parts = Vec::new();
+            for i in 0..8 {
+                let start = i * 4;
+                if start + 4 <= chars.len() {
+                    let part: String = chars[start..start + 4].iter().collect();
+                    parts.push(format!("{:x}", u16::from_str_radix(&part, 16).unwrap_or(0)));
+                }
+            }
+            format!("[{}]", parts.join(":"))
+        } else {
+            let hex_val = u32::from_str_radix(hex.trim(), 16).unwrap_or(0);
+            let bytes = hex_val.to_be_bytes();
+            format!("{}.{}.{}.{}", bytes[3], bytes[2], bytes[1], bytes[0])
+        }
+    }
+
+    fn parse_proc_net(file: &str, protocol: &str, is_v6: bool) -> Vec<PortInfo> {
+        let mut ports = Vec::new();
+
+        if let Ok(content) = fs::read_to_string(file) {
+            for line in content.lines().skip(1) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 10 {
+                    let local_addr = parts[1];
+                    let state_hex = parts[3];
+
+                    // State 0A = LISTEN for TCP
+                    let is_listening = protocol == "UDP" || state_hex == "0A";
+
+                    if is_listening {
+                        let addr_parts: Vec<&str> = local_addr.rsplitn(2, ':').collect();
+                        if addr_parts.len() == 2 {
+                            let addr = hex_to_ip(addr_parts[1], is_v6);
+                            let port = u16::from_str_radix(addr_parts[0].trim(), 16).unwrap_or(0);
+
+                            let inode = parts[9];
+                            let pid = find_pid_by_inode(inode);
+
+                            ports.push(PortInfo {
+                                protocol: protocol.to_string(),
+                                local_address: addr,
+                                local_port: port,
+                                state: "LISTEN".to_string(),
+                                pid,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        ports
+    }
+
+    fn find_pid_by_inode(inode: &str) -> u32 {
+        if let Ok(entries) = fs::read_dir("/proc") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(pid_str) = path.file_name().and_then(|n| n.to_str()) {
+                    if pid_str.chars().all(|c| c.is_ascii_digit()) {
+                        if let Ok(pid_num) = pid_str.parse::<u32>() {
+                            let fd_path = path.join("fd");
+                            if let Ok(fd_entries) = fs::read_dir(&fd_path) {
+                                for fd_entry in fd_entries.flatten() {
+                                    if let Ok(link) = fs::read_link(fd_entry.path()) {
+                                        if let Some(link_str) = link.to_str() {
+                                            if link_str.contains(&format!("socket:[{}]", inode)) {
+                                                return pid_num;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        0
+    }
+
+    pub fn get_listening_ports_unix() -> Result<Vec<PortInfo>, anyhow::Error> {
+        let mut ports = Vec::new();
+
+        if Path::new("/proc/net/tcp").exists() {
+            ports.extend(parse_proc_net("/proc/net/tcp", "TCP", false));
+        }
+        if Path::new("/proc/net/tcp6").exists() {
+            ports.extend(parse_proc_net("/proc/net/tcp6", "TCP", true));
+        }
+        if Path::new("/proc/net/udp").exists() {
+            ports.extend(parse_proc_net("/proc/net/udp", "UDP", false));
+        }
+        if Path::new("/proc/net/udp6").exists() {
+            ports.extend(parse_proc_net("/proc/net/udp6", "UDP", true));
+        }
+
+        Ok(ports)
+    }
+}
+
+#[cfg(windows)]
+use windows_impl::get_listening_ports_windows as get_ports_platform;
+
+#[cfg(unix)]
+use unix_impl::get_listening_ports_unix as get_ports_platform;
+
+fn get_listening_ports() -> Result<Vec<PortInfo>, anyhow::Error> {
+    get_ports_platform()
 }
 
 /// Display all listening ports
@@ -169,38 +236,52 @@ fn display_all_ports(ports: &[PortInfo]) {
     println!("{:<10} {:<25} {:<10} {:<10}", "Protocol", "Address", "State", "PID");
     println!("{}", "-".repeat(60));
 
-    for port in ports {
+    // Sort by port number
+    let mut sorted_ports = ports.to_vec();
+    sorted_ports.sort_by(|a, b| a.local_port.cmp(&b.local_port));
+
+    for port in &sorted_ports {
         let addr = if port.local_address.contains('[') {
-            // IPv6 address format
-            if let Some(end) = port.local_address.rfind(']') {
-                &port.local_address[..=end]
-            } else {
-                port.local_address.as_str()
-            }
+            port.local_address.as_str()
         } else {
             port.local_address.as_str()
         };
 
-        // Truncate address if too long
         let addr_display = if addr.len() > 25 {
             format!("{}...", &addr[..22])
         } else {
             addr.to_string()
         };
 
-        println!("{:<10} {:<25} {:<10} {:<10}", port.protocol, addr_display, port.state, port.pid);
+        println!(
+            "{:<10} {:<25} {:<10} {:<10}",
+            port.protocol,
+            format!("{}:{}", addr_display, port.local_port),
+            port.state,
+            if port.pid > 0 {
+                port.pid.to_string()
+            } else {
+                "N/A".to_string()
+            }
+        );
     }
 
     println!();
-    println!("Total: {} listening port(s)", ports.len());
+    println!("Total: {} listening port(s)", sorted_ports.len());
 }
 
 /// Display port query result
-fn display_port_result(port: u16, pid: Option<&str>) {
-    if let Some(pid) = pid {
-        println!("Port {} is in use by process ID: {}", port, pid);
-    } else {
-        println!("Port {} is not in use.", port);
+fn display_port_result(port: u16, pid: Option<u32>) {
+    match pid {
+        Some(p) if p > 0 => {
+            println!("Port {} is in use by process ID: {}", port, p);
+        }
+        Some(_) => {
+            println!("Port {} is in use (PID information not available).", port);
+        }
+        None => {
+            println!("Port {} is not in use.", port);
+        }
     }
 }
 
@@ -214,7 +295,7 @@ pub async fn port_list_command(_cli: Cli) -> Result<RcurlResponse, anyhow::Error
 /// Port command - find process by port number
 pub async fn port_find_command(port: u16, _cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
     let pid = find_pid_by_port(port)?;
-    display_port_result(port, pid.as_deref());
+    display_port_result(port, pid);
     Ok(RcurlResponse::Port(()))
 }
 
@@ -223,10 +304,13 @@ pub async fn port_kill_command(port: u16, _cli: Cli) -> Result<RcurlResponse, an
     let pid = find_pid_by_port(port)?;
 
     match pid {
-        Some(pid_str) => {
-            println!("Killing process {} using port {}...", pid_str, port);
-            kill_process(&pid_str)?;
-            println!("Successfully killed process {}.", pid_str);
+        Some(p) if p > 0 => {
+            println!("Killing process {} using port {}...", p, port);
+            kill_process(p)?;
+            println!("Successfully killed process {}.", p);
+        }
+        Some(_) => {
+            println!("Port {} is in use but PID information is not available.", port);
         }
         None => {
             println!("Port {} is not in use. No process to kill.", port);
