@@ -32,7 +32,11 @@ fn kill_process(pid: u32) -> Result<(), anyhow::Error> {
     }
 
     let mut sys = System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        true,
+        sysinfo::ProcessRefreshKind::everything(),
+    );
 
     if let Some(process) = sys.process(Pid::from_u32(pid)) {
         if process.kill() {
@@ -270,11 +274,42 @@ fn display_all_ports(ports: &[PortInfo]) {
     println!("Total: {} listening port(s)", sorted_ports.len());
 }
 
-/// Display port query result
+/// Get process command line string
+fn get_process_command(pid: u32) -> Option<String> {
+    use sysinfo::ProcessRefreshKind;
+
+    let mut sys = System::new();
+    // Refresh with full process information including command line
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::everything(),
+    );
+
+    if let Some(process) = sys.process(Pid::from_u32(pid)) {
+        let name = process.name();
+        let cmd: Vec<String> = process.cmd()
+            .iter()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
+        if !cmd.is_empty() {
+            Some(cmd.join(" "))
+        } else {
+            Some(name.to_string_lossy().to_string())
+        }
+    } else {
+        None
+    }
+}
+
+/// Display port query result with process command
 fn display_port_result(port: u16, pid: Option<u32>) {
     match pid {
         Some(p) if p > 0 => {
             println!("Port {} is in use by process ID: {}", port, p);
+            if let Some(cmd) = get_process_command(p) {
+                println!("Command: {}", cmd);
+            }
         }
         Some(_) => {
             println!("Port {} is in use (PID information not available).", port);
