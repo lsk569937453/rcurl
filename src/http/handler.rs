@@ -162,6 +162,14 @@ fn build_request(cli: &Cli, uri: &Uri) -> Result<Request<Full<Bytes>>, anyhow::E
     } else if let Some(upload_file) = cli.uploadfile_option.as_ref() {
         let byte_vec = std::fs::read(upload_file)?;
         body_bytes = Bytes::from(byte_vec);
+        // Set Content-Type for file upload based on file extension
+        let mime_guess = mime_guess::from_path(upload_file)
+            .first()
+            .unwrap_or(mime::APPLICATION_OCTET_STREAM);
+        header_map.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_str(mime_guess.to_string().as_str())?,
+        );
     }
 
     for x in &cli.headers {

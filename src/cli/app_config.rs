@@ -64,6 +64,17 @@ pub enum QuickCommand {
   rcurl sftp://sftp.example.com               # SFTP (SSH File Transfer)
   rcurl -u user:pass ftp://ftp.example.com    # FTP with authentication
 
+File Upload:
+  rcurl -T file.txt http://example.com/upload        # Upload file via PUT
+  rcurl --upload-file image.jpg http://example.com   # Upload with long option
+  rcurl -T data.bin -X POST http://example.com/api   # Upload with POST method
+  rcurl -F 'file=@/path/to/file' http://example.com  # Upload as multipart form
+
+File Download:
+  rcurl -o output.html http://example.com            # Save response to file
+  rcurl -o image.jpg http://example.com/image.jpg    # Download and save image
+  rcurl -o data.json http://api.example.com/data     # Download JSON data
+
 Proxy Support:
   Set environment variables to use proxy:
     export ALL_PROXY=http://127.0.0.1:7890    # Unix/Linux/MacOS
