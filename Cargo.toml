@@ -1,6 +1,6 @@
 [package]
 name = "cargo-rcurl"
-version = "0.0.35"
+version = "0.0.36"
 edition = "2024"
 description = "A modern, feature-rich curl alternative written in Rust"
 license = "MIT"
