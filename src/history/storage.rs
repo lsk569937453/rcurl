@@ -5,6 +5,9 @@ use std::path::PathBuf;
 use super::dirs;
 use super::types::HistoryEntry;
 
+/// Maximum number of history entries to keep
+const MAX_HISTORY_SIZE: usize = 1000;
+
 /// 获取历史记录文件路径
 pub fn get_history_file_path() -> PathBuf {
     dirs::get_history_dir().join("rcurl.req")
@@ -51,6 +54,11 @@ pub fn save_request(command: &str, cli: &crate::cli::app_config::Cli) -> Result<
         cli: Some(cli.clone()),
     };
     history.insert(0, entry);
+
+    // 限制历史记录数量，保留最新的 MAX_HISTORY_SIZE 条
+    if history.len() > MAX_HISTORY_SIZE {
+        history.truncate(MAX_HISTORY_SIZE);
+    }
 
     // 写入文件（只保存 command，cli 不保存到文件以避免序列化问题）
     let save_history: Vec<HistoryEntry> = history
