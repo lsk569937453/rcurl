@@ -14,7 +14,7 @@ pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, any
     let system_config = ResolverConfig::default();
 
     // 使用系统 DNS（等价于 dig 默认）
-    let resolver = Resolver::builder_tokio().unwrap().build().unwrap();
+    let resolver = Resolver::builder_tokio()?.build()?;
 
     // 查询 A 记录
     let response = resolver
