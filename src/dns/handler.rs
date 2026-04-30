@@ -17,12 +17,8 @@ pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, any
     // 使用系统 DNS（等价于 dig 默认）
     // let resolver = TokioResolver::builder(TokioConnectionProvider::default())?.build();
 
-    let mut io_loop = Runtime::new().unwrap();
+    let resolver = Resolver::builder_tokio().unwrap().build().unwrap();
 
-    let resolver =
-        Resolver::builder_with_config(ResolverConfig::default(), TokioRuntimeProvider::default())
-            .build()
-            .unwrap();
     // 查询 A 记录
     let response = resolver
         .lookup(domain.clone(), hickory_resolver::proto::rr::RecordType::A)
@@ -88,5 +84,5 @@ fn rand_id() -> u16 {
 
 /// 简单估算返回消息大小（非精确）
 fn estimate_msg_size(resp: Lookup) -> usize {
-    32 + resp.iter().count() * 16
+    32 + resp.answers().len() * 16
 }
