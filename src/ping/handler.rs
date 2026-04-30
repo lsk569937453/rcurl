@@ -29,7 +29,7 @@ pub async fn ping_command(host: String, _cli: Cli) -> Result<RcurlResponse, anyh
     let mut received = 0;
     let mut rtts = Vec::new();
 
-    for seq in 1..=count {
+    for _seq in 1..=count {
         transmitted += 1;
 
         let p = ping::new(ip);
@@ -42,7 +42,7 @@ pub async fn ping_command(host: String, _cli: Cli) -> Result<RcurlResponse, anyh
                 rtts.push(rtt);
                 println!("Reply from {}: bytes={} time={}ms", ip, payload_size, rtt);
             }
-            Err(e) => {
+            Err(_e) => {
                 println!("Request timed out.");
             }
         }

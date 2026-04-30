@@ -1,22 +1,19 @@
 use crate::cli::app_config::Cli;
 use crate::response::res::RcurlResponse;
 use chrono::Local;
-
-use hickory_resolver::lookup::Lookup;
-
 use hickory_resolver::Resolver;
 use hickory_resolver::config::ResolverConfig;
-use hickory_resolver::net::runtime::TokioRuntimeProvider;
+use hickory_resolver::lookup::Lookup;
 use std::time::Instant;
-use tokio::runtime::Runtime;
 /// DNS lookup command (like dig)
 pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
     // 记录开始时间
     let start = Instant::now();
 
-    // 使用系统 DNS（等价于 dig 默认）
-    // let resolver = TokioResolver::builder(TokioConnectionProvider::default())?.build();
+    // 获取系统 DNS 配置以显示服务器信息
+    let system_config = ResolverConfig::default();
 
+    // 使用系统 DNS（等价于 dig 默认）
     let resolver = Resolver::builder_tokio().unwrap().build().unwrap();
 
     // 查询 A 记录
@@ -54,13 +51,11 @@ pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, any
     println!("\n;; Query time: {} msec", elapsed);
 
     // 显示 DNS server
-    if let Some(server) = resolver.config().name_servers().first() {
-        println!(
-            ";; SERVER: {}#{} ({})",
-            server.socket_addr.ip(),
-            server.socket_addr.port(),
-            server.socket_addr.ip()
-        );
+    if let Some(server) = system_config.name_servers().first() {
+        let port = 53; // DNS 默认端口
+        println!(";; SERVER: {}#{} ({})", server.ip, port, server.ip);
+    } else {
+        println!(";; SERVER: <system DNS>");
     }
 
     println!(

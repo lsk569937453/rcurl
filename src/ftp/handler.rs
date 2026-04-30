@@ -93,7 +93,7 @@ pub async fn ftp_request(cli: Cli, scheme: &str) -> Result<(), anyhow::Error> {
         let _ = ftp_stream.put_file(String::from(file_name), &mut pro);
         pb.finish_with_message("upload success");
     } else if let Some(quote) = cli.quote_option.clone() {
-        let response = ftp_stream.site(quote)?;
+        let _response = ftp_stream.site(quote)?;
     } else {
         let file_list = ftp_stream
             .list(None)
