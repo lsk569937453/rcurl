@@ -1,18 +1,28 @@
 use crate::cli::app_config::Cli;
 use crate::response::res::RcurlResponse;
 use chrono::Local;
-use hickory_resolver::TokioResolver;
 
 use hickory_resolver::lookup::Lookup;
-use hickory_resolver::name_server::TokioConnectionProvider;
+
+use hickory_resolver::Resolver;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use std::time::Instant;
+use tokio::runtime::Runtime;
 /// DNS lookup command (like dig)
 pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
     // 记录开始时间
     let start = Instant::now();
 
     // 使用系统 DNS（等价于 dig 默认）
-    let resolver = TokioResolver::builder(TokioConnectionProvider::default())?.build();
+    // let resolver = TokioResolver::builder(TokioConnectionProvider::default())?.build();
+
+    let mut io_loop = Runtime::new().unwrap();
+
+    let resolver =
+        Resolver::builder_with_config(ResolverConfig::default(), TokioRuntimeProvider::default())
+            .build()
+            .unwrap();
     // 查询 A 记录
     let response = resolver
         .lookup(domain.clone(), hickory_resolver::proto::rr::RecordType::A)
@@ -33,18 +43,16 @@ pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, any
     );
     println!(
         ";; flags: qr rd ra; QUERY: 1, ANSWER: {}, AUTHORITY: 0, ADDITIONAL: 1",
-        response.iter().count()
+        response.answers().len()
     );
 
     println!("\n;; QUESTION SECTION:");
     println!(";{} \t\tIN\tA", domain);
 
     println!("\n;; ANSWER SECTION:");
-    for ip in response.iter() {
-        if ip.is_a() {
-            // TTL 在 high-level API 中不可直接获取，dig 一般是从 DNS RR 里拿
-            println!("{} \t600\tIN\tA\t{}", domain, ip);
-        }
+    for ip in response.answers() {
+        // TTL 在 high-level API 中不可直接获取，dig 一般是从 DNS RR 里拿
+        println!("{} \t600\tIN\tA\t{}", domain, ip);
     }
 
     println!("\n;; Query time: {} msec", elapsed);
