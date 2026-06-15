@@ -3,13 +3,14 @@ use crate::disk::handler::disk_size_command;
 use crate::dns::handler::dns_command;
 use crate::ftp::handler::ftp_request;
 use crate::history::command::command_from_cli;
-use crate::history::storage::load_history;
+use crate::history::storage::load_history_entries;
 use crate::history::storage::save_request;
 use crate::http::handler::http_request_with_redirects;
 use crate::ping::handler::ping_command;
 use crate::port::handler::{port_find_command, port_kill_command, port_list_command};
 use crate::response::res::RcurlResponse;
 use crate::telnet::handler::telnet_command;
+use crate::tui::history_selector::HistorySelector;
 use crate::whois::handler::whois_command;
 use clap::Parser;
 use tracing::Level;
@@ -67,7 +68,7 @@ fn init_logging(verbosity: u8) {
 }
 
 async fn interactive_mode() -> Result<RcurlResponse, anyhow::Error> {
-    let history = load_history().unwrap_or_default();
+    let history = load_history_entries().unwrap_or_default();
 
     if history.is_empty() {
         println!("No request history found.");
@@ -75,11 +76,14 @@ async fn interactive_mode() -> Result<RcurlResponse, anyhow::Error> {
         return Ok(RcurlResponse::Ftp(()));
     }
 
-    let options = &history[..];
+    // 使用 TUI 界面选择历史命令
+    let mut selector = HistorySelector::new(history);
+    let selected = selector.run()?;
 
-    let selected = inquire::Select::new("Select a request from history:", options.to_vec())
-        .with_page_size(10)
-        .prompt()?;
+    let selected = match selected {
+        Some(cmd) => cmd,
+        None => return Ok(RcurlResponse::Ftp(())),
+    };
 
     // 解析选中的命令并执行
     let args = shell_words::split(&selected)

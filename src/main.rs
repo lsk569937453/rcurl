@@ -16,6 +16,7 @@ mod ping;
 mod port;
 mod response;
 mod telnet;
+mod tui;
 mod whois;
 
 #[tokio::main]
