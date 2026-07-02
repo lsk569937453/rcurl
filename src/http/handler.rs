@@ -14,8 +14,8 @@ use http::header::{
     ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderName, HeaderValue, USER_AGENT,
 };
 use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, BodyStream, Empty, Full};
-use hyper::body::{Body, Incoming};
+use http_body_util::{BodyExt, BodyStream, Full};
+use hyper::body::Body;
 use hyper::client::conn::http1;
 use hyper::{Request, Response, Uri};
 use hyper_util::client::legacy::Client;

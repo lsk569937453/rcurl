@@ -25,7 +25,6 @@ pub enum QuickCommand {
         port: u16,
     },
     /// DNS lookup (like dig)
-    #[command(alias = "ns")]
     Ns {
         /// Domain name to query
         domain: String,

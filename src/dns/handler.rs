@@ -2,9 +2,8 @@ use crate::cli::app_config::Cli;
 use crate::response::res::RcurlResponse;
 use chrono::Local;
 use hickory_resolver::TokioResolver;
-
+use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::lookup::Lookup;
-use hickory_resolver::name_server::TokioConnectionProvider;
 use std::time::Instant;
 /// DNS lookup command (like dig)
 pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
@@ -12,7 +11,9 @@ pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, any
     let start = Instant::now();
 
     // 使用系统 DNS（等价于 dig 默认）
-    let resolver = TokioResolver::builder(TokioConnectionProvider::default())?.build();
+    let config = ResolverConfig::default();
+    let name_servers = config.name_servers().to_vec();
+    let resolver = TokioResolver::builder_tokio()?.build()?;
     // 查询 A 记录
     let response = resolver
         .lookup(domain.clone(), hickory_resolver::proto::rr::RecordType::A)
@@ -22,7 +23,7 @@ pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, any
 
     // ---- 模拟 dig 输出 ----
     println!(
-        "; <<>> Rust DiG (hickory-resolver 0.25.2) <<>> {}",
+        "; <<>> Rust DiG (hickory-resolver 0.26.1) <<>> {}",
         domain.clone()
     );
     println!(";; global options: +cmd");
@@ -33,16 +34,15 @@ pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, any
     );
     println!(
         ";; flags: qr rd ra; QUERY: 1, ANSWER: {}, AUTHORITY: 0, ADDITIONAL: 1",
-        response.iter().count()
+        response.answers().len()
     );
 
     println!("\n;; QUESTION SECTION:");
     println!(";{} \t\tIN\tA", domain);
 
     println!("\n;; ANSWER SECTION:");
-    for ip in response.iter() {
-        if ip.is_a() {
-            // TTL 在 high-level API 中不可直接获取，dig 一般是从 DNS RR 里拿
+    for record in response.answers() {
+        if let hickory_resolver::proto::rr::RData::A(ip) = record.data {
             println!("{} \t600\tIN\tA\t{}", domain, ip);
         }
     }
@@ -50,12 +50,11 @@ pub async fn dns_command(domain: String, _cli: Cli) -> Result<RcurlResponse, any
     println!("\n;; Query time: {} msec", elapsed);
 
     // 显示 DNS server
-    if let Some(server) = resolver.config().name_servers().first() {
+    if let Some(server) = name_servers.first() {
         println!(
-            ";; SERVER: {}#{} ({})",
-            server.socket_addr.ip(),
-            server.socket_addr.port(),
-            server.socket_addr.ip()
+            ";; SERVER: {}#53 ({})",
+            server.ip,
+            server.ip
         );
     }
 
@@ -80,5 +79,5 @@ fn rand_id() -> u16 {
 
 /// 简单估算返回消息大小（非精确）
 fn estimate_msg_size(resp: Lookup) -> usize {
-    32 + resp.iter().count() * 16
+    32 + resp.answers().len() * 16
 }
