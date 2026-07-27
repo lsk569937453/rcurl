@@ -4,6 +4,7 @@ use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use walkdir::WalkDir;
 
@@ -141,29 +142,29 @@ fn get_disk_usage(path: &Path) -> Result<Vec<DiskEntry>, anyhow::Error> {
             }
         }
 
-        // Create spinning progress bar
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} {msg}")?);
+        // Progress bar tracking completed directories. Use a real completion
+        // counter instead of the array index, because rayon runs these out of
+        // order: with the index the displayed [x/y] would jump around.
+        let total = dirs.len();
+        let pb = ProgressBar::new(total as u64);
+        pb.set_style(ProgressStyle::with_template("{spinner:.green} [{pos}/{len}] {msg}")?);
         pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
-        // Calculate directory sizes in parallel with progress indicator
+        let done = AtomicUsize::new(0);
         let mut dir_sizes: Vec<(PathBuf, u64)> = dirs
-            .par_iter() // Parallel iteration
-            .enumerate()
-            .map(|(idx, dir_path)| {
+            .par_iter()
+            .map(|dir_path| {
                 let dir_name = dir_path
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string();
-                pb.set_message(format!(
-                    "Scanning [{}/{}]: {}",
-                    idx + 1,
-                    dirs.len(),
-                    dir_name
-                ));
-
+                // Increment *after* computing so the count is monotonically
+                // increasing and reflects actual progress.
                 let size = calculate_dir_size_parallel(dir_path);
+                let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                pb.set_message(format!("Scanned [{}/{}]: {}", n, total, dir_name));
+                pb.inc(1);
                 (dir_path.clone(), size)
             })
             .collect();
