@@ -8,6 +8,7 @@ mod tls;
 use crate::app::run::main_with_error;
 mod app;
 mod cli;
+mod count;
 mod disk;
 mod dns;
 mod history;

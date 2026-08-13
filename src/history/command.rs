@@ -15,6 +15,10 @@ pub fn command_from_cli(cli: &Cli) -> String {
                 cmd.push_str(&format!(" d {}", target));
                 return cmd;
             }
+            QuickCommand::Count { target } => {
+                cmd.push_str(&format!(" c {}", target));
+                return cmd;
+            }
             QuickCommand::Telnet { host, port } => {
                 cmd.push_str(&format!(" t {} {}", host, port));
                 return cmd;

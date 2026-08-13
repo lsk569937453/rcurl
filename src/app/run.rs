@@ -1,4 +1,5 @@
 use crate::cli::app_config::{Cli, QuickCommand};
+use crate::count::handler::count_lines_command;
 use crate::disk::handler::disk_size_command;
 use crate::dns::handler::dns_command;
 use crate::ftp::handler::ftp_request;
@@ -171,6 +172,7 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
         return match cmd {
             QuickCommand::Ping { target } => ping_command(target.clone(), cli).await,
             QuickCommand::Disk { target } => disk_size_command(target.clone(), cli).await,
+            QuickCommand::Count { target } => count_lines_command(target.clone(), cli).await,
             QuickCommand::Telnet { host, port } => telnet_command(host.clone(), *port, cli).await,
             QuickCommand::Ns { domain } => dns_command(domain.clone(), cli).await,
             QuickCommand::Whois { target } => whois_command(target.clone(), cli).await,

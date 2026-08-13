@@ -16,6 +16,13 @@ pub enum QuickCommand {
         #[arg(default_value = ".")]
         target: String,
     },
+    /// Count lines of code in a directory
+    #[command(alias = "c")]
+    Count {
+        /// Path to count (default: current directory)
+        #[arg(default_value = ".")]
+        target: String,
+    },
     /// Telnet to a host and port
     #[command(alias = "t")]
     Telnet {
@@ -103,6 +110,8 @@ Quick Commands:
   rcurl p 8.8.8.8                             # Ping an IP address (shorthand)
   rcurl disk .                                # Check disk size (current directory)
   rcurl d /home                               # Check disk size for specific path (shorthand)
+  rcurl count .                               # Count lines of code (current directory)
+  rcurl c .                                   # Count lines of code (shorthand)
   rcurl telnet example.com 80                 # Telnet to host:port
   rcurl t 192.168.1.1 23                     # Telnet with shorthand
   rcurl ns google.com                         # DNS lookup (like dig)

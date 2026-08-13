@@ -4,6 +4,7 @@ pub enum RcurlResponse {
     Http(()),
     Ping(()),
     DiskSize(()),
+    Count(()),
     Telnet(()),
     Dns(()),
     Whois(()),
