@@ -3,6 +3,7 @@ use crate::count::handler::count_lines_command;
 use crate::disk::handler::disk_size_command;
 use crate::dns::handler::dns_command;
 use crate::ftp::handler::ftp_request;
+use crate::git::handler::git_statistic_command;
 use crate::history::command::command_from_cli;
 use crate::history::storage::load_history_entries;
 use crate::history::storage::save_request;
@@ -173,6 +174,7 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
             QuickCommand::Ping { target } => ping_command(target.clone(), cli).await,
             QuickCommand::Disk { target } => disk_size_command(target.clone(), cli).await,
             QuickCommand::Count { target } => count_lines_command(target.clone(), cli).await,
+            QuickCommand::Git { target } => git_statistic_command(target.clone(), cli).await,
             QuickCommand::Telnet { host, port } => telnet_command(host.clone(), *port, cli).await,
             QuickCommand::Ns { domain } => dns_command(domain.clone(), cli).await,
             QuickCommand::Whois { target } => whois_command(target.clone(), cli).await,

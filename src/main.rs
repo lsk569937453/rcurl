@@ -4,6 +4,7 @@ extern crate anyhow;
 extern crate tracing;
 
 mod ftp;
+mod git;
 mod tls;
 use crate::app::run::main_with_error;
 mod app;

@@ -23,6 +23,13 @@ pub enum QuickCommand {
         #[arg(default_value = ".")]
         target: String,
     },
+    /// Git statistics report (HTML) for a repository
+    #[command(alias = "g")]
+    Git {
+        /// Path to the git repository (default: current directory)
+        #[arg(default_value = ".")]
+        target: String,
+    },
     /// Telnet to a host and port
     #[command(alias = "t")]
     Telnet {
@@ -112,6 +119,9 @@ Quick Commands:
   rcurl d /home                               # Check disk size for specific path (shorthand)
   rcurl count .                               # Count lines of code (current directory)
   rcurl c .                                   # Count lines of code (shorthand)
+  rcurl git .                                 # Git statistics HTML report (current directory)
+  rcurl g /path/to/repo                       # Git statistics report (shorthand)
+  rcurl g . -o report.html                    # Git statistics report to specific file
   rcurl telnet example.com 80                 # Telnet to host:port
   rcurl t 192.168.1.1 23                     # Telnet with shorthand
   rcurl ns google.com                         # DNS lookup (like dig)

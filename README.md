@@ -17,7 +17,7 @@
 - Verbose mode for debugging (-v, -vv)
 - Request timing breakdown (--time)
 - Proxy support (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY)
-- Quick commands: ping, disk, telnet, DNS lookup, WHOIS, port query
+- Quick commands: ping, disk, count, git statistics, telnet, DNS lookup, WHOIS, port query
 - Interactive mode with request history
 
 ## rcurl vs curl
@@ -184,6 +184,14 @@ rcurl whois 8.8.8.8       # IP lookup
 ```bash
 rcurl disk .             # Current directory
 rcurl d /home            # Specific path (shorthand)
+```
+
+**Git statistics report (self-contained HTML):**
+
+```bash
+rcurl git .              # Analyze current repository
+rcurl g /path/to/repo    # Specific repository (shorthand)
+rcurl g . -o report.html # Save to a specific file
 ```
 
 **Telnet to a host:port:**
