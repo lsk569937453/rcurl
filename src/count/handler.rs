@@ -5,10 +5,22 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
-use walkdir::WalkDir;
+use ignore::WalkBuilder;
 
-/// Directories to skip during traversal.
-const SKIP_DIRS: &[&str] = &["target", "node_modules"];
+/// Directories to skip during traversal (version control, IDE, dependency and
+/// build caches that never contain meaningful source code).
+const SKIP_DIRS: &[&str] = &[
+    "target",
+    "node_modules",
+    ".git",
+    ".hg",
+    ".svn",
+    ".idea",
+    ".vscode",
+    ".venv",
+    "venv",
+    "__pycache__",
+];
 
 pub async fn count_lines_command(path: String, _cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
     let path_obj = Path::new(&path);
@@ -91,13 +103,19 @@ fn collect_files(path: &Path) -> Result<Vec<PathBuf>, anyhow::Error> {
         return Ok(files);
     }
 
-    for entry in WalkDir::new(path)
+    for entry in WalkBuilder::new(path)
         .follow_links(false)
-        .into_iter()
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .ignore(true)
+        .parents(true)
         .filter_entry(|e| !should_skip_dir(e))
+        .build()
         .filter_map(|e| e.ok())
     {
-        if entry.file_type().is_file() && is_countable(entry.path()) {
+        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) && is_countable(entry.path()) {
             files.push(entry.path().to_path_buf());
         }
     }
@@ -105,13 +123,15 @@ fn collect_files(path: &Path) -> Result<Vec<PathBuf>, anyhow::Error> {
     Ok(files)
 }
 
-/// Whether a directory entry should be skipped (e.g. target, node_modules).
-fn should_skip_dir(entry: &walkdir::DirEntry) -> bool {
-    if !entry.file_type().is_dir() {
+/// Whether a directory entry should always be skipped, even without a
+/// .gitignore (e.g. target, node_modules). Entries matched by .gitignore are
+/// already excluded by the walker itself.
+fn should_skip_dir(entry: &ignore::DirEntry) -> bool {
+    if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
         return false;
     }
     let name = entry.file_name().to_string_lossy();
-    SKIP_DIRS.contains(&name.as_ref())
+    SKIP_DIRS.contains(&name.as_ref()) || name.starts_with("target-")
 }
 
 /// Whether a file should be counted: must have an extension and not be binary.

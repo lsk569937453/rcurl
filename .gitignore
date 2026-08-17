@@ -17,3 +17,4 @@ logs
 rcurl-git-statistics.html
 .vscode
 .claude
+*.html
