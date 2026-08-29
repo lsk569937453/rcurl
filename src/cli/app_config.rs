@@ -60,6 +60,12 @@ pub enum QuickCommand {
         kill: bool,
     },
     /// HTTP load testing (stress test) for a URL
+    #[command(after_help = "Examples:
+  rcurl lt http://example.com               # Load test with defaults (50 concurrency, 500000 requests)
+  rcurl lt http://example.com -c 100 -d 30s # Load test with 100 concurrency for 30 seconds
+  rcurl lt http://example.com -r 1000       # Load test with a fixed 1000 requests
+  rcurl lt http://example.com --timeout 2s -r 1000  # Load test with custom per-request timeout
+  rcurl lt http://example.com -H 'Content-Type: application/json' -b '{\"key\":\"value\"}'  # Load test POSTing a JSON body (body implies POST)")]
     Lt {
         /// The URL to load test, e.g., http://localhost:8080/
         #[arg(value_parser = parse_lt_url)]
