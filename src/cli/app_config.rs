@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 #[derive(Subcommand, Serialize, Deserialize, Debug, Clone)]
 pub enum QuickCommand {
@@ -57,6 +58,51 @@ pub enum QuickCommand {
         /// Kill the process using the specified port
         #[arg(long)]
         kill: bool,
+    },
+    /// HTTP load testing (stress test) for a URL
+    Lt {
+        /// The URL to load test, e.g., http://localhost:8080/
+        #[arg(value_parser = parse_lt_url)]
+        url: String,
+
+        /// Number of concurrent workers
+        #[arg(short = 'c', long, default_value_t = 50)]
+        concurrency: u16,
+
+        /// Duration of the test (e.g., 30s, 10m). Mutually exclusive with --requests
+        #[arg(
+            short = 'd',
+            long,
+            value_parser = parse_lt_duration,
+            conflicts_with = "requests"
+        )]
+        duration: Option<Duration>,
+
+        /// Total number of requests to send. Mutually exclusive with --duration
+        #[arg(
+            short = 'r',
+            long,
+            default_value = "500000",
+            conflicts_with = "duration"
+        )]
+        requests: u64,
+
+        /// Add a custom HTTP header. Can be used multiple times. Format: "Key:Value"
+        #[arg(
+            short = 'H',
+            long = "header",
+            value_parser = parse_lt_key_val,
+            name = "KEY_VALUE"
+        )]
+        headers: Vec<(String, String)>,
+
+        /// The request body. If it starts with '@', the rest is a file path to read the body from
+        #[arg(short = 'b', long)]
+        body: Option<String>,
+
+        /// Per-request timeout (e.g., 500ms, 2s)
+        #[arg(long, value_parser = parse_lt_duration, default_value = "500ms")]
+        timeout: Duration,
     },
 }
 
@@ -132,6 +178,9 @@ Quick Commands:
   rcurl l                                     # List all listening ports (shorthand)
   rcurl port 8080                             # Find process using port 8080
   rcurl port 3000 --kill                      # Kill process using port 3000
+  rcurl lt http://example.com -c 100 -d 30s   # Load test with 100 concurrency for 30 seconds
+  rcurl lt http://example.com -r 1000         # Load test with 1000 requests
+  rcurl lt http://example.com --timeout 2s -r 1000  # Load test with custom per-request timeout
 
 Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {
@@ -220,4 +269,57 @@ pub struct Cli {
     /// Quick command (ping, disk, telnet, ns, whois, and their shorthands)
     #[command(subcommand)]
     pub quick_cmd: Option<QuickCommand>,
+}
+
+/// Validate a load-test URL: only http/https with a host is accepted.
+fn parse_lt_url(s: &str) -> Result<String, String> {
+    let uri: hyper::Uri = s
+        .parse()
+        .map_err(|e| format!("Invalid URL format: {e}"))?;
+
+    match uri.scheme_str() {
+        Some("http") | Some("https") => (),
+        Some(other) => {
+            return Err(format!(
+                "Unsupported scheme: '{other}'. Only 'http' or 'https' are supported."
+            ))
+        }
+        None => return Err("URL must include a scheme (e.g., http:// or https://)".to_string()),
+    }
+
+    if uri.host().is_none() {
+        return Err("URL must include a host (e.g., 'google.com')".to_string());
+    }
+
+    Ok(s.to_string())
+}
+
+/// A strict duration parser that only accepts s, ms, m, d.
+fn parse_lt_duration(s: &str) -> Result<Duration, String> {
+    let split_point = s.find(|c: char| !c.is_ascii_digit());
+
+    let (num_str, unit_str) = match split_point {
+        Some(idx) => s.split_at(idx),
+        None => return Err("Invalid format. Must include a unit (e.g., 30s, 10m).".to_string()),
+    };
+
+    let value: u64 = num_str
+        .parse()
+        .map_err(|_| format!("Invalid number: '{num_str}'"))?;
+
+    match unit_str {
+        "s" => Ok(Duration::from_secs(value)),
+        "ms" => Ok(Duration::from_millis(value)),
+        "m" => Ok(Duration::from_secs(value * 60)),
+        "d" => Ok(Duration::from_secs(value * 60 * 60 * 24)),
+        _ => Err(format!(
+            "Unsupported time unit: '{unit_str}'. Use 's', 'ms', 'm', or 'd'."
+        )),
+    }
+}
+
+fn parse_lt_key_val(s: &str) -> Result<(String, String), String> {
+    s.split_once(':')
+        .map(|(key, val)| (key.trim().to_string(), val.trim().to_string()))
+        .ok_or_else(|| "Header must be in 'Key:Value' format".to_string())
 }

@@ -14,6 +14,7 @@ mod disk;
 mod dns;
 mod history;
 mod http;
+mod lt;
 mod ping;
 mod port;
 mod response;

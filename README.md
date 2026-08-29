@@ -17,7 +17,7 @@
 - Verbose mode for debugging (-v, -vv)
 - Request timing breakdown (--time)
 - Proxy support (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY)
-- Quick commands: ping, disk, count, git statistics, telnet, DNS lookup, WHOIS, port query
+- Quick commands: ping, disk, count, git statistics, telnet, DNS lookup, WHOIS, port query, load testing
 - Interactive mode with request history
 
 ## rcurl vs curl
@@ -190,9 +190,20 @@ rcurl d /home            # Specific path (shorthand)
 
 ```bash
 rcurl git .              # Analyze current repository
-rcurl g /path/to/repo    # Specific repository (shorthand)
+rcurl g /path/to/repo    # Specific path (shorthand)
 rcurl g . -o report.html # Save to a specific file
 ```
+
+**HTTP load testing (stress test):**
+
+```bash
+rcurl lt http://example.com -c 100 -d 30s   # 100 concurrency for 30 seconds
+rcurl lt http://example.com -r 1000         # Fixed 1000 requests
+rcurl lt http://example.com -H 'Authorization: Bearer token' -b '{"key":"value"}' # Custom headers and body
+rcurl lt http://example.com -r 1000 --timeout 2s  # Custom per-request timeout (default 500ms)
+```
+
+Reports latency percentiles (P50/P90/P95/P99), RPS, status code distribution, and errors.
 
 **Telnet to a host:port:**
 
@@ -260,6 +271,7 @@ Below is a complete list of available command-line options:
 | `ns`    |           | `<domain>`| DNS lookup (like dig).          |
 | `whois` | `w`       | `<target>` | WHOIS lookup for domain/IP info. |
 | `port`  | `l`       | `[port] [--kill]` | List/listening ports or find/kill process by port. |
+| `lt`    |           | `<url> [flags]` | HTTP load testing (stress test) with latency percentiles. |
 
 ### Proxy Support
 

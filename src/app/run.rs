@@ -8,6 +8,7 @@ use crate::history::command::command_from_cli;
 use crate::history::storage::load_history_entries;
 use crate::history::storage::save_request;
 use crate::http::handler::http_request_with_redirects;
+use crate::lt::handler::load_test_command;
 use crate::ping::handler::ping_command;
 use crate::port::handler::{port_find_command, port_kill_command, port_list_command};
 use crate::response::res::RcurlResponse;
@@ -188,6 +189,27 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
                 } else {
                     port_list_command(cli).await
                 }
+            }
+            QuickCommand::Lt {
+                url,
+                concurrency,
+                duration,
+                requests,
+                headers,
+                body,
+                timeout,
+            } => {
+                load_test_command(
+                    url.clone(),
+                    *concurrency,
+                    *duration,
+                    *requests,
+                    headers.clone(),
+                    body.clone(),
+                    *timeout,
+                    cli,
+                )
+                .await
             }
         };
     }

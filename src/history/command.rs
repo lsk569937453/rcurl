@@ -47,6 +47,38 @@ pub fn command_from_cli(cli: &Cli) -> String {
                 }
                 return cmd;
             }
+            QuickCommand::Lt {
+                url,
+                concurrency,
+                duration,
+                requests,
+                headers,
+                body,
+                timeout,
+            } => {
+                cmd.push_str(&format!(" lt {}", url));
+                cmd.push_str(&format!(" -c {}", concurrency));
+                if let Some(d) = duration {
+                    cmd.push_str(&format!(" -d {}", format_lt_duration(*d)));
+                } else {
+                    cmd.push_str(&format!(" -r {}", requests));
+                }
+                for (key, value) in headers {
+                    cmd.push_str(&format!(
+                        " -H '{}:{}'",
+                        key.replace('\'', "'\\''"),
+                        value.replace('\'', "'\\''")
+                    ));
+                }
+                if let Some(b) = body {
+                    cmd.push_str(&format!(" -b '{}'", b.replace('\'', "'\\''")));
+                }
+                // Only record the timeout when it differs from the default.
+                if *timeout != std::time::Duration::from_millis(500) {
+                    cmd.push_str(&format!(" --timeout {}", format_lt_duration(*timeout)));
+                }
+                return cmd;
+            }
         }
     }
 
@@ -152,4 +184,18 @@ pub fn command_from_cli(cli: &Cli) -> String {
     }
 
     cmd
+}
+
+/// 将压测时长格式化为 lt 命令接受的单位（s/ms/m/d）。
+fn format_lt_duration(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    if secs == 0 {
+        format!("{}ms", d.as_millis())
+    } else if secs.is_multiple_of(86400) {
+        format!("{}d", secs / 86400)
+    } else if secs.is_multiple_of(60) {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}s", secs)
+    }
 }

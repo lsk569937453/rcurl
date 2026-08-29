@@ -24,6 +24,7 @@ form-data-builder = "=1.0.1"
 futures = "=0.3.33"
 git2 = "=0.21.0"
 futures-util = { version = "=0.3.33", default-features = false }
+hdrhistogram = "=7.5.4"
 hickory-resolver = "=0.26.1"
 http = "=1.4.2"
 http-body-util = { version = "=0.1.4" }
