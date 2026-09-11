@@ -195,7 +195,7 @@ impl CommitAgg {
     fn calc_recent_week(&mut self, time: &DateTime<Local>) {
         let week = time.iso_week().week() as i32;
         let year = time.iso_week().year();
-        let now = Utc::now();
+        let now = Local::now();
         let now_week = now.iso_week().week() as i32;
         let now_year = now.iso_week().year();
         let week_number = (now_year * 52 + now_week) - (year * 52 + week);

@@ -258,7 +258,7 @@ fn analyze_files(repo: &Repository) -> Result<FileStatisticInfo, anyhow::Error> 
 struct TagRef {
     tag_name: String,
     tag_oid: git2::Oid,
-    date_time: chrono::DateTime<chrono::Utc>,
+    date_time: chrono::DateTime<chrono::Local>,
 }
 
 /// Collect tag refs: annotated tags use the tagger time (falling back to the
@@ -282,8 +282,7 @@ fn collect_tag_refs(repo: &Repository) -> Result<Vec<TagRef>, anyhow::Error> {
                 .map(|c| c.time())
                 .unwrap_or_else(|_| git2::Time::new(0, 0))
         };
-        let date_time = chrono::DateTime::from_timestamp(when.seconds(), 0)
-            .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).expect("epoch"));
+        let date_time = to_local_time(when.seconds());
         tag_refs.push(TagRef {
             tag_name: name.to_string(),
             tag_oid: target,
