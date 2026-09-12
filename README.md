@@ -17,7 +17,7 @@
 - Verbose mode for debugging (-v, -vv)
 - Request timing breakdown (--time)
 - Proxy support (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY)
-- Quick commands: ping, disk, count, git statistics, telnet, DNS lookup, WHOIS, port query, load testing
+- Quick commands: ping, disk, count, git statistics, telnet, DNS lookup, WHOIS, port query, load testing, clean build artifacts
 - Interactive mode with request history
 
 ## rcurl vs curl
@@ -194,6 +194,16 @@ rcurl g /path/to/repo    # Specific path (shorthand)
 rcurl g . -o report.html # Save to a specific file
 ```
 
+**Clean build artifacts:**
+
+```bash
+rcurl clean .              # Find and remove build artifacts with confirmation
+rcurl cl /path/to/project  # Specific path (shorthand)
+rcurl clean . -y           # Delete without confirmation
+```
+
+Recursively finds and removes regenerable build directories (target, node_modules, dist, build, out, venv, __pycache__, .next, .gradle, cmake-build-*, ...). Version control internals (.git) are never touched.
+
 **HTTP load testing (stress test):**
 
 ```bash
@@ -272,6 +282,7 @@ Below is a complete list of available command-line options:
 | `whois` | `w`       | `<target>` | WHOIS lookup for domain/IP info. |
 | `port`  | `l`       | `[port] [--kill]` | List/listening ports or find/kill process by port. |
 | `lt`    |           | `<url> [flags]` | HTTP load testing (stress test) with latency percentiles. |
+| `clean` | `cl`      | `<path> [-y]` | Remove build artifacts and dependency caches (target, node_modules, ...) with confirmation. |
 
 ### Proxy Support
 

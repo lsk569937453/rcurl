@@ -79,6 +79,13 @@ pub fn command_from_cli(cli: &Cli) -> String {
                 }
                 return cmd;
             }
+            QuickCommand::Clean { target, yes } => {
+                cmd.push_str(&format!(" clean {}", target));
+                if *yes {
+                    cmd.push_str(" --yes");
+                }
+                return cmd;
+            }
         }
     }
 

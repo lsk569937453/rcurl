@@ -110,6 +110,16 @@ pub enum QuickCommand {
         #[arg(long, value_parser = parse_lt_duration, default_value = "500ms")]
         timeout: Duration,
     },
+    /// Clean build artifacts and dependency caches (target, node_modules, etc.)
+    #[command(alias = "cl")]
+    Clean {
+        /// Path to clean (default: current directory)
+        #[arg(default_value = ".")]
+        target: String,
+        /// Delete without confirmation
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
 }
 
 #[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
@@ -187,6 +197,8 @@ Quick Commands:
   rcurl lt http://example.com -c 100 -d 30s   # Load test with 100 concurrency for 30 seconds
   rcurl lt http://example.com -r 1000         # Load test with 1000 requests
   rcurl lt http://example.com --timeout 2s -r 1000  # Load test with custom per-request timeout
+  rcurl clean .                               # Clean build artifacts (target, node_modules, ...) with confirmation
+  rcurl cl /path/to/project -y                # Clean without confirmation (shorthand)
 
 Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {

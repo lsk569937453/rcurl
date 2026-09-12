@@ -8,6 +8,7 @@ mod git;
 mod tls;
 use crate::app::run::main_with_error;
 mod app;
+mod clean;
 mod cli;
 mod count;
 mod disk;

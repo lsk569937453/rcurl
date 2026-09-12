@@ -1,3 +1,4 @@
+use crate::clean::handler::clean_command;
 use crate::cli::app_config::{Cli, QuickCommand};
 use crate::count::handler::count_lines_command;
 use crate::disk::handler::disk_size_command;
@@ -211,6 +212,7 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
                 )
                 .await
             }
+            QuickCommand::Clean { target, yes } => clean_command(target.clone(), *yes, cli).await,
         };
     }
 
