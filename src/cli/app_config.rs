@@ -2,6 +2,9 @@ use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+/// Default number of repositories pulled concurrently by `rcurl pull`.
+pub const DEFAULT_PULL_JOBS: u16 = 4;
+
 #[derive(Subcommand, Serialize, Deserialize, Debug, Clone)]
 pub enum QuickCommand {
     /// Ping a host to check connectivity
@@ -124,7 +127,9 @@ pub enum QuickCommand {
     #[command(alias = "pl", after_help = "Examples:
   rcurl pull lsk569937453 .              # Pull every matching repo under the current directory
   rcurl pull lsk569937453 /path/to/code  # Scan a specific directory
-  rcurl pull lsk569937453 . --dry-run    # Only list the repositories that would be pulled")]
+  rcurl pull lsk569937453 . --dry-run    # Only list the repositories that would be pulled
+  rcurl pull lsk569937453 . -j 8         # Pull up to 8 repositories concurrently
+  rcurl pull lsk569937453 . -j 1         # Serial pull (allows interactive credential prompts)")]
     Pull {
         /// Text that must appear in a repository remote URL (case-insensitive)
         keyword: String,
@@ -134,6 +139,14 @@ pub enum QuickCommand {
         /// Only list matching repositories; do not run git pull
         #[arg(long)]
         dry_run: bool,
+        /// Number of repositories to pull concurrently (1 = serial/interactive)
+        #[arg(
+            short = 'j',
+            long,
+            default_value_t = DEFAULT_PULL_JOBS,
+            value_parser = clap::value_parser!(u16).range(1..)
+        )]
+        jobs: u16,
     },
 }
 
@@ -216,6 +229,8 @@ Quick Commands:
   rcurl cl /path/to/project -y                # Clean without confirmation (shorthand)
   rcurl pull lsk569937453 .                   # Pull matching git repos under current dir
   rcurl pull lsk569937453 /path/to/code       # Pull matching git repos under a directory
+  rcurl pull lsk569937453 . -j 8              # Pull up to 8 matching git repos concurrently
+  rcurl pull lsk569937453 . -j 1              # Serial pull (allows interactive prompts)
   rcurl pull lsk569937453 . --dry-run         # Only list matching git repos
 
 Project home: https://github.com/lsk569937453/rcurl")]

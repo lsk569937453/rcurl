@@ -1,4 +1,4 @@
-use crate::cli::app_config::{Cli, QuickCommand};
+use crate::cli::app_config::{Cli, DEFAULT_PULL_JOBS, QuickCommand};
 
 /// 将 Cli 结构转换为命令字符串
 pub fn command_from_cli(cli: &Cli) -> String {
@@ -90,11 +90,16 @@ pub fn command_from_cli(cli: &Cli) -> String {
                 keyword,
                 target,
                 dry_run,
+                jobs,
             } => {
                 cmd.push_str(&format!(" pull {}", keyword));
                 cmd.push_str(&format!(" {}", target));
                 if *dry_run {
                     cmd.push_str(" --dry-run");
+                }
+                // Only record the worker count when it differs from the default.
+                if *jobs != DEFAULT_PULL_JOBS {
+                    cmd.push_str(&format!(" -j {}", jobs));
                 }
                 return cmd;
             }
@@ -216,5 +221,23 @@ fn format_lt_duration(d: std::time::Duration) -> String {
         format!("{}m", secs / 60)
     } else {
         format!("{}s", secs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn pull_history_omits_the_default_worker_count() {
+        let cli = Cli::parse_from(["rcurl", "pull", "keyword", "."]);
+        assert_eq!(command_from_cli(&cli), "rcurl pull keyword .");
+    }
+
+    #[test]
+    fn pull_history_records_a_non_default_worker_count() {
+        let cli = Cli::parse_from(["rcurl", "pull", "keyword", ".", "-j", "8"]);
+        assert_eq!(command_from_cli(&cli), "rcurl pull keyword . -j 8");
     }
 }

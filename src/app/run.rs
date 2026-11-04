@@ -218,7 +218,8 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
                 keyword,
                 target,
                 dry_run,
-            } => pull_command(keyword.clone(), target.clone(), *dry_run, cli).await,
+                jobs,
+            } => pull_command(keyword.clone(), target.clone(), *dry_run, *jobs, cli).await,
         };
     }
 

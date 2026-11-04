@@ -17,7 +17,7 @@
 - Verbose mode for debugging (-v, -vv)
 - Request timing breakdown (--time)
 - Proxy support (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY)
-- Quick commands: ping, disk, count, git statistics, git pull, telnet, DNS lookup, WHOIS, port query, load testing, clean build artifacts
+- Quick commands: ping, disk, count, git statistics, parallel git pull, telnet, DNS lookup, WHOIS, port query, load testing, clean build artifacts
 - Interactive mode with request history
 
 ## rcurl vs curl
@@ -200,10 +200,14 @@ rcurl g . -o report.html # Save to a specific file
 rcurl pull lsk569937453 .              # Scan current directory and pull matching repos
 rcurl pull lsk569937453 /path/to/code  # Scan a specific directory
 rcurl pull lsk569937453 . --dry-run    # Only list the repositories that would be pulled
+rcurl pull lsk569937453 . -j 8         # Pull up to 8 repositories at a time
+rcurl pull lsk569937453 . -j 1         # Serial pull (allows interactive credential prompts)
 rcurl pl lsk569937453 .                # Shorthand
 ```
 
-Recursively finds git repositories whose remote URL contains the keyword (case-insensitive) and runs `git pull` in each one. Repositories whose current branch tracks a different upstream are pulled from the matching remote explicitly, and detached HEADs are skipped. Build and dependency caches (`target`, `node_modules`, ...) are not crawled.
+Recursively finds git repositories whose remote URL contains the keyword (case-insensitive) and runs `git pull` in each one. Up to 4 repositories are pulled concurrently by default; use `-j N` to change the worker count, or `-j 1` for a serial pull. Repositories whose current branch tracks a different upstream are pulled from the matching remote explicitly, and detached HEADs are skipped. Build and dependency caches (`target`, `node_modules`, ...) are not crawled.
+
+Parallel pulls are non-interactive: git's standard input is closed and terminal prompts are disabled, so repositories that need interactive credentials, SSH passphrases, or GPG input should be pulled with `-j 1`. Each repository's output is captured during the pull and printed as one block when it finishes.
 
 **Clean build artifacts:**
 
@@ -294,7 +298,7 @@ Below is a complete list of available command-line options:
 | `port`  | `l`       | `[port] [--kill]` | List/listening ports or find/kill process by port. |
 | `lt`    |           | `<url> [flags]` | HTTP load testing (stress test) with latency percentiles. |
 | `clean` | `cl`      | `<path> [-y]` | Remove build artifacts and dependency caches (target, node_modules, ...) with confirmation. |
-| `pull`  | `pl`      | `<keyword> <path> [--dry-run]` | Recursively pull git repositories whose remote URL contains the keyword. |
+| `pull`  | `pl`      | `<keyword> <path> [--dry-run] [-j N]` | Recursively pull git repositories whose remote URL contains the keyword. |
 
 ### Proxy Support
 

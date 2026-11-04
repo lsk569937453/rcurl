@@ -3,9 +3,12 @@ use crate::response::res::RcurlResponse;
 use anyhow::anyhow;
 use git2::Repository;
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
 /// Directories that are never crawled while looking for repositories: version
@@ -38,12 +41,36 @@ struct RemoteMatch {
     upstream_matches: bool,
 }
 
+/// One repository scheduled for a concurrent `git pull`.
+struct PullJob {
+    index: usize,
+    path: PathBuf,
+    remote: String,
+    url: String,
+    args: Vec<String>,
+}
+
+/// Outcome of one concurrent pull.
+enum PullResult {
+    Pulled { output: String },
+    Failed { reason: String, output: String },
+    SpawnFailed { error: String },
+    Cancelled,
+}
+
+/// A completed concurrent pull, including the job it ran.
+struct PullAttempt {
+    job: PullJob,
+    result: PullResult,
+}
+
 /// Pull every git repository under `target` that has a remote URL containing
 /// `keyword`.
 pub async fn pull_command(
     keyword: String,
     target: String,
     dry_run: bool,
+    jobs: u16,
     _cli: Cli,
 ) -> Result<RcurlResponse, anyhow::Error> {
     let keyword = keyword.trim();
@@ -88,48 +115,107 @@ pub async fn pull_command(
     }
 
     let total = matched.len();
+    let runnable = matched
+        .iter()
+        .filter(|found| {
+            pull_args(
+                found.upstream_matches,
+                &found.remote,
+                found.branch.as_deref(),
+            )
+            .is_some()
+        })
+        .count();
+    let workers = effective_workers(jobs, runnable);
+
     let mut pulled = 0usize;
     let mut failed: Vec<(PathBuf, String)> = Vec::new();
     let mut fatal: Option<anyhow::Error> = None;
 
-    for (index, found) in matched.iter().enumerate() {
-        println!("[{}/{}] {}", index + 1, total, found.path.display());
-        println!("      {} -> {}", found.remote, found.url);
-        std::io::stdout().flush()?;
+    if dry_run || workers == 1 {
+        for (index, found) in matched.iter().enumerate() {
+            println!("[{}/{}] {}", index + 1, total, found.path.display());
+            println!("      {} -> {}", found.remote, found.url);
+            std::io::stdout().flush()?;
 
-        let args = pull_args(
-            found.upstream_matches,
-            &found.remote,
-            found.branch.as_deref(),
-        );
-        let Some(args) = args else {
-            println!("      skipped: not on a branch");
-            skipped.push((found.path.clone(), "not on a branch".to_string()));
-            continue;
-        };
+            let args = pull_args(
+                found.upstream_matches,
+                &found.remote,
+                found.branch.as_deref(),
+            );
+            let Some(args) = args else {
+                println!("      skipped: not on a branch");
+                skipped.push((found.path.clone(), "not on a branch".to_string()));
+                continue;
+            };
 
-        if dry_run {
-            let mut command = format!("git -C {} pull --no-edit", found.path.display());
-            for arg in &args {
-                command.push(' ');
-                command.push_str(arg);
+            if dry_run {
+                let mut command = format!("git -C {} pull --no-edit", found.path.display());
+                for arg in &args {
+                    command.push(' ');
+                    command.push_str(arg);
+                }
+                println!("      {command}");
+                continue;
             }
-            println!("      {command}");
-            continue;
+
+            match run_git_pull(&found.path, &args) {
+                Ok(status) if status.success() => pulled += 1,
+                Ok(status) => {
+                    failed.push((found.path.clone(), format!("git pull exited with {status}")))
+                }
+                Err(err) => {
+                    failed.push((found.path.clone(), err.to_string()));
+                    fatal = Some(anyhow!(
+                        "pull: failed to run git ({}). Is git installed and on PATH?",
+                        err
+                    ));
+                    break;
+                }
+            }
+        }
+    } else {
+        let mut pending: Vec<PullJob> = Vec::with_capacity(runnable);
+        for (index, found) in matched.iter().enumerate() {
+            match pull_args(
+                found.upstream_matches,
+                &found.remote,
+                found.branch.as_deref(),
+            ) {
+                Some(args) => pending.push(PullJob {
+                    index,
+                    path: found.path.clone(),
+                    remote: found.remote.clone(),
+                    url: found.url.clone(),
+                    args,
+                }),
+                None => skipped.push((found.path.clone(), "not on a branch".to_string())),
+            }
         }
 
-        match run_git_pull(&found.path, &args) {
-            Ok(status) if status.success() => pulled += 1,
-            Ok(status) => {
-                failed.push((found.path.clone(), format!("git pull exited with {status}")))
-            }
-            Err(err) => {
-                failed.push((found.path.clone(), err.to_string()));
-                fatal = Some(anyhow!(
-                    "pull: failed to run git ({}). Is git installed and on PATH?",
-                    err
-                ));
-                break;
+        println!(
+            "Pulling {} repositories with {} workers (non-interactive; use -j 1 for interactive prompts)...",
+            pending.len(),
+            workers
+        );
+        std::io::stdout().flush()?;
+
+        let attempts = run_jobs_parallel(pending, workers)?;
+        for attempt in &attempts {
+            match &attempt.result {
+                PullResult::Pulled { .. } => pulled += 1,
+                PullResult::Failed { reason, .. } => {
+                    failed.push((attempt.job.path.clone(), reason.clone()));
+                }
+                PullResult::SpawnFailed { error } => {
+                    if fatal.is_none() {
+                        fatal = Some(anyhow!(
+                            "pull: failed to run git ({}). Is git installed and on PATH?",
+                            error
+                        ));
+                    }
+                }
+                PullResult::Cancelled => {}
             }
         }
     }
@@ -177,6 +263,124 @@ pub async fn pull_command(
     }
 
     Ok(RcurlResponse::Pull(()))
+}
+
+/// Number of workers to use for `repositories` pull jobs. A single repository
+/// falls back to the serial path, which keeps interactive git prompts working.
+fn effective_workers(requested: u16, repositories: usize) -> usize {
+    if repositories == 0 {
+        return 1;
+    }
+    (requested as usize).min(repositories).max(1)
+}
+
+/// Run each job on a bounded rayon thread pool, printing each repository's
+/// captured output as one block when it finishes. A failure to start git stops
+/// further jobs from being launched, but work already in flight still finishes.
+fn run_jobs_parallel(
+    jobs: Vec<PullJob>,
+    workers: usize,
+) -> Result<Vec<PullAttempt>, anyhow::Error> {
+    let total = jobs.len();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(workers)
+        .build()
+        .map_err(|err| anyhow!("pull: failed to create worker pool: {err}"))?;
+
+    let print_lock = Mutex::new(());
+    let done = AtomicUsize::new(0);
+    let spawn_failed = AtomicBool::new(false);
+
+    let mut attempts: Vec<PullAttempt> = pool.install(move || {
+        jobs.into_par_iter()
+            .map(|job| {
+                if spawn_failed.load(Ordering::Relaxed) {
+                    return PullAttempt {
+                        job,
+                        result: PullResult::Cancelled,
+                    };
+                }
+
+                let result = match run_git_pull_captured(&job.path, &job.args) {
+                    Ok(output) if output.status.success() => PullResult::Pulled {
+                        output: captured_output_text(&output.stdout, &output.stderr),
+                    },
+                    Ok(output) => PullResult::Failed {
+                        reason: format!("git pull exited with {}", output.status),
+                        output: captured_output_text(&output.stdout, &output.stderr),
+                    },
+                    Err(err) => {
+                        spawn_failed.store(true, Ordering::Relaxed);
+                        PullResult::SpawnFailed {
+                            error: err.to_string(),
+                        }
+                    }
+                };
+
+                let attempt = PullAttempt { job, result };
+                {
+                    let _guard = print_lock
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    if !matches!(&attempt.result, PullResult::Cancelled) {
+                        let ordinal = done.fetch_add(1, Ordering::Relaxed) + 1;
+                        print_parallel_attempt(&attempt, ordinal, total);
+                    }
+                }
+                attempt
+            })
+            .collect()
+    });
+
+    attempts.sort_by_key(|attempt| attempt.job.index);
+    Ok(attempts)
+}
+
+/// Print one completed repository's header, captured git output and status.
+fn print_parallel_attempt(attempt: &PullAttempt, ordinal: usize, total: usize) {
+    println!("[{}/{}] {}", ordinal, total, attempt.job.path.display());
+    println!("      {} -> {}", attempt.job.remote, attempt.job.url);
+
+    match &attempt.result {
+        PullResult::Pulled { output } => {
+            print_captured_output(output);
+            println!("      done");
+        }
+        PullResult::Failed { reason, output } => {
+            print_captured_output(output);
+            println!("      failed: {reason}");
+        }
+        PullResult::SpawnFailed { error } => {
+            println!("      failed to run git: {error}");
+        }
+        PullResult::Cancelled => {}
+    }
+
+    let _ = std::io::stdout().flush();
+}
+
+/// Print captured git output indented under the repository header, splitting
+/// progress-style carriage returns as well as normal line feeds.
+fn print_captured_output(output: &str) {
+    for line in output.split(['\r', '\n']) {
+        if !line.trim().is_empty() {
+            println!("      {line}");
+        }
+    }
+}
+
+/// Combine captured stdout and stderr into one printable block. Invalid UTF-8
+/// is replaced rather than failing the pull summary.
+fn captured_output_text(stdout: &[u8], stderr: &[u8]) -> String {
+    let mut text = String::from_utf8_lossy(stdout).into_owned();
+    let stderr = String::from_utf8_lossy(stderr);
+    if !stderr.is_empty() {
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&stderr);
+    }
+    text
 }
 
 /// Recursively collect every git repository root under `root`.
@@ -334,19 +538,38 @@ fn pull_args(upstream_matches: bool, remote: &str, branch: Option<&str>) -> Opti
     branch.map(|name| vec![remote.to_string(), name.to_string()])
 }
 
-/// Run `git -C <path> pull --no-edit` with inherited standard streams, so git's
-/// own progress, merge output and credential prompts reach the terminal.
-fn run_git_pull(path: &Path, extra: &[String]) -> std::io::Result<std::process::ExitStatus> {
-    Command::new("git")
+/// Build `git -C <path> pull --no-edit` plus the extra remote/branch arguments.
+fn git_pull_command(path: &Path, extra: &[String]) -> Command {
+    let mut command = Command::new("git");
+    command
         .arg("-C")
         .arg(path)
         .arg("pull")
         .arg("--no-edit")
-        .args(extra)
+        .args(extra);
+    command
+}
+
+/// Run `git -C <path> pull --no-edit` with inherited standard streams, so git's
+/// own progress, merge output and credential prompts reach the terminal.
+fn run_git_pull(path: &Path, extra: &[String]) -> std::io::Result<std::process::ExitStatus> {
+    git_pull_command(path, extra)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
+}
+
+/// Run a pull with captured output for concurrent execution. Standard input is
+/// closed and terminal prompts are disabled so several git processes cannot
+/// fight over the terminal; use `--jobs 1` for interactive authentication.
+fn run_git_pull_captured(path: &Path, extra: &[String]) -> std::io::Result<Output> {
+    git_pull_command(path, extra)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
 }
 
 /// Format duration in human-readable format
@@ -422,5 +645,47 @@ mod tests {
         assert!(should_skip_dir(".git"));
         assert!(!should_skip_dir("github"));
         assert!(!should_skip_dir("rust-projects"));
+    }
+
+    #[test]
+    fn effective_workers_clamps_to_workload() {
+        assert_eq!(effective_workers(8, 3), 3);
+        assert_eq!(effective_workers(4, 10), 4);
+        assert_eq!(effective_workers(1, 10), 1);
+        assert_eq!(effective_workers(4, 0), 1);
+        assert_eq!(effective_workers(0, 5), 1);
+    }
+
+    #[test]
+    fn git_pull_command_builds_expected_arguments() {
+        let command = git_pull_command(
+            Path::new("repo"),
+            &["upstream".to_string(), "dev".to_string()],
+        );
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let expected: Vec<String> = ["-C", "repo", "pull", "--no-edit", "upstream", "dev"]
+            .iter()
+            .map(|arg| arg.to_string())
+            .collect();
+        assert_eq!(args, expected);
+    }
+
+    #[test]
+    fn captured_output_text_combines_stdout_and_stderr() {
+        assert_eq!(
+            captured_output_text(b"Already up to date.", b"warning"),
+            "Already up to date.\nwarning"
+        );
+        assert_eq!(captured_output_text(b"line\n", b"error"), "line\nerror");
+        assert_eq!(captured_output_text(b"", b"only stderr"), "only stderr");
+    }
+
+    #[test]
+    fn captured_output_text_handles_invalid_utf8() {
+        let text = captured_output_text(&[0xff], b"");
+        assert!(text.contains('\u{fffd}'));
     }
 }
