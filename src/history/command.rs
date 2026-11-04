@@ -86,6 +86,18 @@ pub fn command_from_cli(cli: &Cli) -> String {
                 }
                 return cmd;
             }
+            QuickCommand::Pull {
+                keyword,
+                target,
+                dry_run,
+            } => {
+                cmd.push_str(&format!(" pull {}", keyword));
+                cmd.push_str(&format!(" {}", target));
+                if *dry_run {
+                    cmd.push_str(" --dry-run");
+                }
+                return cmd;
+            }
         }
     }
 

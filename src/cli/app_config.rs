@@ -120,6 +120,21 @@ pub enum QuickCommand {
         #[arg(short = 'y', long)]
         yes: bool,
     },
+    /// Pull every git repository whose remote URL contains <keyword>
+    #[command(alias = "pl", after_help = "Examples:
+  rcurl pull lsk569937453 .              # Pull every matching repo under the current directory
+  rcurl pull lsk569937453 /path/to/code  # Scan a specific directory
+  rcurl pull lsk569937453 . --dry-run    # Only list the repositories that would be pulled")]
+    Pull {
+        /// Text that must appear in a repository remote URL (case-insensitive)
+        keyword: String,
+        /// Directory to scan recursively (default: current directory)
+        #[arg(default_value = ".")]
+        target: String,
+        /// Only list matching repositories; do not run git pull
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Parser, Default, Serialize, Deserialize, Debug, Clone)]
@@ -199,6 +214,9 @@ Quick Commands:
   rcurl lt http://example.com --timeout 2s -r 1000  # Load test with custom per-request timeout
   rcurl clean .                               # Clean build artifacts (target, node_modules, ...) with confirmation
   rcurl cl /path/to/project -y                # Clean without confirmation (shorthand)
+  rcurl pull lsk569937453 .                   # Pull matching git repos under current dir
+  rcurl pull lsk569937453 /path/to/code       # Pull matching git repos under a directory
+  rcurl pull lsk569937453 . --dry-run         # Only list matching git repos
 
 Project home: https://github.com/lsk569937453/rcurl")]
 pub struct Cli {

@@ -12,6 +12,7 @@ use crate::http::handler::http_request_with_redirects;
 use crate::lt::handler::load_test_command;
 use crate::ping::handler::ping_command;
 use crate::port::handler::{port_find_command, port_kill_command, port_list_command};
+use crate::pull::handler::pull_command;
 use crate::response::res::RcurlResponse;
 use crate::telnet::handler::telnet_command;
 use crate::tui::history_selector::HistorySelector;
@@ -213,6 +214,11 @@ async fn execute_request(cli: Cli) -> Result<RcurlResponse, anyhow::Error> {
                 .await
             }
             QuickCommand::Clean { target, yes } => clean_command(target.clone(), *yes, cli).await,
+            QuickCommand::Pull {
+                keyword,
+                target,
+                dry_run,
+            } => pull_command(keyword.clone(), target.clone(), *dry_run, cli).await,
         };
     }
 

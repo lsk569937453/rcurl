@@ -12,4 +12,5 @@ pub enum RcurlResponse {
     Port(()),
     LoadTest(()),
     Clean(()),
+    Pull(()),
 }

@@ -1,0 +1,426 @@
+use crate::cli::app_config::Cli;
+use crate::response::res::RcurlResponse;
+use anyhow::anyhow;
+use git2::Repository;
+use ignore::WalkBuilder;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::Instant;
+
+/// Directories that are never crawled while looking for repositories: version
+/// control internals plus dependency and build caches that cannot hold a
+/// checkout worth pulling. Repositories ignored by their own `.gitignore` are
+/// already excluded by the walker.
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "out",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".gradle",
+    ".next",
+];
+
+/// One repository whose remote URL contains the search keyword, together with
+/// the information needed to decide how `git pull` should be invoked.
+struct RemoteMatch {
+    path: PathBuf,
+    remote: String,
+    url: String,
+    branch: Option<String>,
+    upstream_matches: bool,
+}
+
+/// Pull every git repository under `target` that has a remote URL containing
+/// `keyword`.
+pub async fn pull_command(
+    keyword: String,
+    target: String,
+    dry_run: bool,
+    _cli: Cli,
+) -> Result<RcurlResponse, anyhow::Error> {
+    let keyword = keyword.trim();
+    if keyword.is_empty() {
+        return Err(anyhow!("pull: keyword must not be empty"));
+    }
+
+    let root = Path::new(&target);
+    if !root.exists() {
+        return Err(anyhow!("pull: path does not exist: {}", target));
+    }
+    if !root.is_dir() {
+        return Err(anyhow!("pull: path is not a directory: {}", target));
+    }
+
+    let start = Instant::now();
+    let keyword_lower = keyword.to_lowercase();
+
+    let repos = find_git_repos(root);
+    let scanned = repos.len();
+
+    let mut matched: Vec<RemoteMatch> = Vec::new();
+    let mut skipped: Vec<(PathBuf, String)> = Vec::new();
+
+    for repo_path in &repos {
+        match open_and_match(repo_path, &keyword_lower) {
+            Ok(Some(found)) => matched.push(found),
+            Ok(None) => {}
+            Err(err) => skipped.push((repo_path.clone(), format!("cannot open repository: {err}"))),
+        }
+    }
+
+    if matched.is_empty() {
+        println!(
+            "No git repositories with a remote matching '{}' under: {}",
+            keyword,
+            root.display()
+        );
+        println!("Scanned {} git repositories.", scanned);
+        println!("Time elapsed: {}", format_duration(start.elapsed()));
+        return Ok(RcurlResponse::Pull(()));
+    }
+
+    let total = matched.len();
+    let mut pulled = 0usize;
+    let mut failed: Vec<(PathBuf, String)> = Vec::new();
+    let mut fatal: Option<anyhow::Error> = None;
+
+    for (index, found) in matched.iter().enumerate() {
+        println!("[{}/{}] {}", index + 1, total, found.path.display());
+        println!("      {} -> {}", found.remote, found.url);
+        std::io::stdout().flush()?;
+
+        let args = pull_args(
+            found.upstream_matches,
+            &found.remote,
+            found.branch.as_deref(),
+        );
+        let Some(args) = args else {
+            println!("      skipped: not on a branch");
+            skipped.push((found.path.clone(), "not on a branch".to_string()));
+            continue;
+        };
+
+        if dry_run {
+            let mut command = format!("git -C {} pull --no-edit", found.path.display());
+            for arg in &args {
+                command.push(' ');
+                command.push_str(arg);
+            }
+            println!("      {command}");
+            continue;
+        }
+
+        match run_git_pull(&found.path, &args) {
+            Ok(status) if status.success() => pulled += 1,
+            Ok(status) => {
+                failed.push((found.path.clone(), format!("git pull exited with {status}")))
+            }
+            Err(err) => {
+                failed.push((found.path.clone(), err.to_string()));
+                fatal = Some(anyhow!(
+                    "pull: failed to run git ({}). Is git installed and on PATH?",
+                    err
+                ));
+                break;
+            }
+        }
+    }
+
+    println!();
+    println!("{}", "-".repeat(60));
+    println!(
+        "Matched {} of {} git repositories under: {}",
+        total,
+        scanned,
+        root.display()
+    );
+    if dry_run {
+        println!("Dry run: no repository was modified.");
+    } else {
+        println!(
+            "Pulled {}, failed {}, skipped {}.",
+            pulled,
+            failed.len(),
+            skipped.len()
+        );
+    }
+
+    if !failed.is_empty() {
+        println!();
+        println!("Failed:");
+        for (path, reason) in &failed {
+            println!("  {} ({})", path.display(), reason);
+        }
+    }
+
+    if !skipped.is_empty() {
+        println!();
+        println!("Skipped:");
+        for (path, reason) in &skipped {
+            println!("  {} ({})", path.display(), reason);
+        }
+    }
+
+    println!();
+    println!("Time elapsed: {}", format_duration(start.elapsed()));
+
+    if let Some(err) = fatal {
+        return Err(err);
+    }
+
+    Ok(RcurlResponse::Pull(()))
+}
+
+/// Recursively collect every git repository root under `root`.
+///
+/// A directory is a repository root when it contains a `.git` entry; that also
+/// covers linked worktrees and submodules, where `.git` is a file. Repositories
+/// are not treated as leaves: walking continues so nested checkouts are found,
+/// and `.gitignore` rules keep the traversal cheap.
+fn find_git_repos(root: &Path) -> Vec<PathBuf> {
+    let mut repos = Vec::new();
+    if is_git_root(root) {
+        repos.push(root.to_path_buf());
+    }
+
+    for entry in WalkBuilder::new(root)
+        .follow_links(false)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .ignore(true)
+        .parents(true)
+        .filter_entry(|entry| entry.depth() == 0 || !should_skip_entry(entry))
+        .build()
+        .filter_map(|entry| entry.ok())
+    {
+        if entry.depth() == 0 {
+            continue;
+        }
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        if is_dir && is_git_root(entry.path()) {
+            repos.push(entry.path().to_path_buf());
+        }
+    }
+
+    repos.sort();
+    repos.dedup();
+    repos
+}
+
+/// Whether `path` is the working tree root of a git repository.
+fn is_git_root(path: &Path) -> bool {
+    path.join(".git").exists()
+}
+
+/// Whether a walk entry is a directory that must not be crawled.
+fn should_skip_entry(entry: &ignore::DirEntry) -> bool {
+    entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+        && should_skip_dir(&entry.file_name().to_string_lossy())
+}
+
+/// Whether a directory name is a crawl-excluded cache directory.
+fn should_skip_dir(name: &str) -> bool {
+    SKIP_DIRS.contains(&name)
+}
+
+/// Open the repository at `path` and find the remote whose URL contains the
+/// keyword. Returns `Ok(None)` when the repository has no such remote.
+fn open_and_match(path: &Path, keyword_lower: &str) -> Result<Option<RemoteMatch>, git2::Error> {
+    let repo = Repository::open(path)?;
+    let branch = current_branch(&repo);
+    let tracked = branch
+        .as_deref()
+        .and_then(|name| tracked_remote(&repo, name));
+
+    let Some((remote, url)) = matching_remote(&repo, keyword_lower, tracked.as_deref()) else {
+        return Ok(None);
+    };
+
+    let upstream_matches = tracked.as_deref() == Some(remote.as_str());
+
+    Ok(Some(RemoteMatch {
+        path: path.to_path_buf(),
+        remote,
+        url,
+        branch,
+        upstream_matches,
+    }))
+}
+
+/// The checked out branch, or `None` for a detached HEAD and an unborn branch.
+fn current_branch(repo: &Repository) -> Option<String> {
+    let head = repo.head().ok()?;
+    if !head.is_branch() {
+        return None;
+    }
+    head.shorthand().ok().map(str::to_string)
+}
+
+/// The remote configured as the upstream of `branch`, if any.
+fn tracked_remote(repo: &Repository, branch: &str) -> Option<String> {
+    let config = repo.config().ok()?;
+    let remote = config.get_string(&format!("branch.{branch}.remote")).ok()?;
+    if remote.is_empty() || remote == "." {
+        None
+    } else {
+        Some(remote)
+    }
+}
+
+/// Find the remote whose URL contains the keyword, preferring `preferred`
+/// (the branch upstream) when it matches too.
+fn matching_remote(
+    repo: &Repository,
+    keyword_lower: &str,
+    preferred: Option<&str>,
+) -> Option<(String, String)> {
+    if let Some(found) = preferred.and_then(|name| remote_match(repo, name, keyword_lower)) {
+        return Some(found);
+    }
+
+    let remotes = repo.remotes().ok()?;
+    for name in remotes.iter().filter_map(|name| name.ok().flatten()) {
+        if Some(name) == preferred {
+            continue;
+        }
+        if let Some(found) = remote_match(repo, name, keyword_lower) {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+/// The `(name, url)` of a single remote when its URL contains the keyword.
+fn remote_match(repo: &Repository, name: &str, keyword_lower: &str) -> Option<(String, String)> {
+    let remote = repo.find_remote(name).ok()?;
+    let url = remote.url().ok()?;
+    if remote_url_matches(url, keyword_lower) {
+        Some((name.to_string(), url.to_string()))
+    } else {
+        None
+    }
+}
+
+/// Case-insensitive substring test between a remote URL and the keyword.
+///
+/// A blank keyword matches nothing: the handler rejects it before scanning,
+/// and the guard keeps the matcher safe on its own.
+fn remote_url_matches(url: &str, keyword_lower: &str) -> bool {
+    let keyword = keyword_lower.trim();
+    !keyword.is_empty() && url.to_lowercase().contains(keyword)
+}
+
+/// Extra `git pull` arguments after `--no-edit`.
+///
+/// When the branch upstream is the matching remote, a plain `git pull` is
+/// enough and respects the user's pull configuration. Otherwise the matching
+/// remote and the current branch are named explicitly, so repositories whose
+/// upstream points elsewhere are not pulled from the wrong place.
+fn pull_args(upstream_matches: bool, remote: &str, branch: Option<&str>) -> Option<Vec<String>> {
+    if upstream_matches {
+        return Some(Vec::new());
+    }
+    branch.map(|name| vec![remote.to_string(), name.to_string()])
+}
+
+/// Run `git -C <path> pull --no-edit` with inherited standard streams, so git's
+/// own progress, merge output and credential prompts reach the terminal.
+fn run_git_pull(path: &Path, extra: &[String]) -> std::io::Result<std::process::ExitStatus> {
+    Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("pull")
+        .arg("--no-edit")
+        .args(extra)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+}
+
+/// Format duration in human-readable format
+fn format_duration(duration: std::time::Duration) -> String {
+    let secs = duration.as_secs_f64();
+
+    if secs >= 60.0 {
+        let minutes = (secs / 60.0).floor();
+        let seconds = secs % 60.0;
+        format!("{}m {:.2}s", minutes, seconds)
+    } else if secs >= 1.0 {
+        format!("{:.2}s", secs)
+    } else {
+        let millis = duration.as_millis();
+        format!("{}ms", millis)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_url_matches_is_case_insensitive() {
+        assert!(remote_url_matches(
+            "https://github.com/lsk569937453/rcurl.git",
+            "lsk569937453"
+        ));
+        assert!(remote_url_matches(
+            "https://github.com/LSK569937453/rcurl.git",
+            "lsk569937453"
+        ));
+        assert!(remote_url_matches(
+            "git@github.com:lsk569937453/rcurl.git",
+            "lsk569937453"
+        ));
+    }
+
+    #[test]
+    fn remote_url_matches_rejects_other_owners_and_blank_keywords() {
+        assert!(!remote_url_matches(
+            "https://github.com/someone-else/rcurl.git",
+            "lsk569937453"
+        ));
+        assert!(!remote_url_matches(
+            "https://github.com/lsk569937453/rcurl.git",
+            "   "
+        ));
+    }
+
+    #[test]
+    fn pull_args_prefers_tracked_upstream() {
+        assert_eq!(pull_args(true, "origin", Some("main")), Some(Vec::new()));
+    }
+
+    #[test]
+    fn pull_args_names_remote_and_branch_when_upstream_differs() {
+        assert_eq!(
+            pull_args(false, "upstream", Some("dev")),
+            Some(vec!["upstream".to_string(), "dev".to_string()])
+        );
+    }
+
+    #[test]
+    fn pull_args_skips_without_a_branch() {
+        assert_eq!(pull_args(false, "origin", None), None);
+    }
+
+    #[test]
+    fn should_skip_dir_recognizes_cache_dirs() {
+        assert!(should_skip_dir("node_modules"));
+        assert!(should_skip_dir("target"));
+        assert!(should_skip_dir(".git"));
+        assert!(!should_skip_dir("github"));
+        assert!(!should_skip_dir("rust-projects"));
+    }
+}
