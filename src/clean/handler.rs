@@ -43,6 +43,12 @@ const CLEAN_DIR_PREFIXES: &[&str] = &["target-", "cmake-build-"];
 /// Version control internals: never cleaned and never descended into.
 const NEVER_TOUCH_DIRS: &[&str] = &[".git", ".hg", ".svn"];
 
+/// Directories that are protected from cleaning: a nested checkout of rcurl
+/// itself keeps its build output, so `rcurl clean <code root>` does not force a
+/// full recompile of the tool. The scan root is exempt, so cleaning *inside* the
+/// rcurl repository (`rcurl clean .`) still works.
+const PROTECTED_DIRS: &[&str] = &["rcurl"];
+
 pub async fn clean_command(
     target: String,
     yes: bool,
@@ -56,10 +62,18 @@ pub async fn clean_command(
 
     let start = Instant::now();
 
-    let dirs = find_clean_dirs(path_obj);
+    let (dirs, protected) = find_clean_dirs(path_obj);
 
     if dirs.is_empty() {
         println!("No build artifacts found under: {}", path_obj.display());
+        if !protected.is_empty() {
+            println!(
+                "Skipped {} protected {}: {}",
+                protected.len(),
+                plural_directory(protected.len()),
+                protected_list(path_obj, &protected)
+            );
+        }
         return Ok(RcurlResponse::Clean(()));
     }
 
@@ -107,6 +121,15 @@ pub async fn clean_command(
         sized.len(),
         format_bytes(total_size)
     );
+
+    if !protected.is_empty() {
+        println!(
+            "Skipped {} protected {}: {}. Delete them explicitly if needed.",
+            protected.len(),
+            plural_directory(protected.len()),
+            protected_list(path_obj, &protected)
+        );
+    }
 
     if !yes && !confirm("Delete them?")? {
         println!("Cancelled.");
@@ -156,16 +179,19 @@ pub async fn clean_command(
     Ok(RcurlResponse::Clean(()))
 }
 
-/// Walk `path` and collect every directory that clean should remove.
-/// No ignore filtering is applied on purpose: target/ and node_modules/
-/// are usually gitignored, yet they are exactly what we are looking for.
-fn find_clean_dirs(path: &Path) -> Vec<PathBuf> {
+/// Walk `path` and collect every directory that clean should remove, plus the
+/// protected directories that were deliberately left alone.
+///
+/// No ignore filtering is applied on purpose: target/ and node_modules/ are
+/// usually gitignored, yet they are exactly what we are looking for.
+fn find_clean_dirs(path: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     // The root itself may be a build directory (e.g. `rcurl clean ./target`).
     if path.is_dir() && is_clean_dir(path) {
-        return vec![path.to_path_buf()];
+        return (vec![path.to_path_buf()], Vec::new());
     }
 
     let mut dirs = Vec::new();
+    let mut protected = Vec::new();
     let mut it = WalkDir::new(path).follow_links(false).into_iter();
 
     while let Some(entry) = it.next() {
@@ -178,13 +204,20 @@ fn find_clean_dirs(path: &Path) -> Vec<PathBuf> {
             it.skip_current_dir();
             continue;
         }
+        // Only nested checkouts are protected: an explicitly targeted rcurl
+        // directory is still cleaned, including `rcurl clean .` inside it.
+        if entry.depth() > 0 && is_protected_dir(&name) {
+            protected.push(entry.into_path());
+            it.skip_current_dir();
+            continue;
+        }
         if is_clean_name(&name) {
             dirs.push(entry.into_path());
             it.skip_current_dir();
         }
     }
 
-    dirs
+    (dirs, protected)
 }
 
 /// Whether a path's final component marks it as a build artifact directory.
@@ -196,6 +229,31 @@ fn is_clean_dir(path: &Path) -> bool {
 
 fn is_clean_name(name: &str) -> bool {
     CLEAN_DIRS.contains(&name) || CLEAN_DIR_PREFIXES.iter().any(|p| name.starts_with(p))
+}
+
+/// Whether a directory is a protected checkout name. Compared case-insensitively
+/// so a `RCurl` directory on a case-insensitive filesystem is protected too.
+fn is_protected_dir(name: &str) -> bool {
+    PROTECTED_DIRS
+        .iter()
+        .any(|protected| name.eq_ignore_ascii_case(protected))
+}
+
+fn plural_directory(count: usize) -> &'static str {
+    if count == 1 {
+        "directory"
+    } else {
+        "directories"
+    }
+}
+
+/// Render protected directories relative to the scan root, comma separated.
+fn protected_list(root: &Path, protected: &[PathBuf]) -> String {
+    protected
+        .iter()
+        .map(|dir| display_relative(root, dir))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Show the path relative to the scan root when possible; falls back to the
@@ -270,5 +328,82 @@ fn format_duration(duration: std::time::Duration) -> String {
     } else {
         let millis = duration.as_millis();
         format!("{}ms", millis)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Create a unique empty temporary directory for a traversal test.
+    fn temp_scan_root(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rcurl-clean-test-{}-{}-{}",
+            std::process::id(),
+            unique,
+            label
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn protected_name_matches_case_insensitively() {
+        assert!(is_protected_dir("rcurl"));
+        assert!(is_protected_dir("RCurl"));
+        assert!(!is_protected_dir("rcurl-ext"));
+        assert!(!is_protected_dir("myrcurl"));
+    }
+
+    #[test]
+    fn find_clean_dirs_skips_nested_rcurl_checkout() {
+        let root = temp_scan_root("nested");
+        let demo_target = root.join("demo").join("target");
+        let rcurl_target = root.join("rcurl").join("target");
+        let rcurl_node_modules = root.join("rcurl").join("node_modules");
+        for dir in [&demo_target, &rcurl_target, &rcurl_node_modules] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+
+        let (dirs, protected) = find_clean_dirs(&root);
+
+        assert_eq!(dirs, vec![demo_target]);
+        assert_eq!(protected, vec![root.join("rcurl")]);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn find_clean_dirs_cleans_inside_an_explicitly_targeted_rcurl_dir() {
+        let root = temp_scan_root("explicit");
+        let rcurl_root = root.join("rcurl");
+        let target = rcurl_root.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+
+        let (dirs, protected) = find_clean_dirs(&rcurl_root);
+
+        assert_eq!(dirs, vec![target]);
+        assert!(protected.is_empty());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn find_clean_dirs_still_ignores_version_control_dirs() {
+        let root = temp_scan_root("vcs");
+        let git_target = root.join(".git").join("target");
+        std::fs::create_dir_all(&git_target).unwrap();
+
+        let (dirs, protected) = find_clean_dirs(&root);
+
+        assert!(dirs.is_empty());
+        assert!(protected.is_empty());
+
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

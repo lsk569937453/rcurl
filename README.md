@@ -209,6 +209,8 @@ Recursively finds git repositories whose remote URL contains the keyword (case-i
 
 Parallel pulls are non-interactive: git's standard input is closed and terminal prompts are disabled, so repositories that need interactive credentials, SSH passphrases, or GPG input should be pulled with `-j 1`. Each repository's output is captured during the pull and printed as one block when it finishes.
 
+Every run ends with a summary (scanned / matched / pulled / failed / skipped / elapsed). Each failed repository is then listed with its remote, branch, exit status, a classified cause (authentication, local changes, conflicts, diverged branches, missing remote branch, network), a hint, and the last lines of git's output. The failing pulls are repeated at the end as ready-to-copy `git -C "<path>" pull --no-edit ...` commands, so they can be retried by hand.
+
 **Clean build artifacts:**
 
 ```bash
@@ -217,7 +219,7 @@ rcurl cl /path/to/project  # Specific path (shorthand)
 rcurl clean . -y           # Delete without confirmation
 ```
 
-Recursively finds and removes regenerable build directories (target, node_modules, dist, build, out, venv, __pycache__, .next, .gradle, cmake-build-*, ...). Version control internals (.git) are never touched.
+Recursively finds and removes regenerable build directories (target, node_modules, dist, build, out, venv, __pycache__, .next, .gradle, cmake-build-*, ...). Version control internals (.git) are never touched. Directories named `rcurl` are protected: a nested rcurl checkout keeps its build output, so a clean run never forces a recompile of the tool. Cleaning inside the rcurl repository itself (`rcurl clean .` run there) still works, and the protected directories are reported in the listing.
 
 **HTTP load testing (stress test):**
 

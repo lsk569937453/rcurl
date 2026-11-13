@@ -47,6 +47,7 @@ struct PullJob {
     path: PathBuf,
     remote: String,
     url: String,
+    branch: Option<String>,
     args: Vec<String>,
 }
 
@@ -62,6 +63,182 @@ enum PullResult {
 struct PullAttempt {
     job: PullJob,
     result: PullResult,
+}
+
+/// Why a pull failed, derived from git's own output. The category only drives
+/// the summary wording; the repository is always reported as failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FailureKind {
+    Authentication,
+    LocalChanges,
+    Conflict,
+    Diverged,
+    RemoteMissing,
+    Network,
+    Other,
+}
+
+/// One failed pull, kept for the final summary together with the command the
+/// user can run by hand.
+struct PullFailure {
+    path: PathBuf,
+    remote: String,
+    url: String,
+    branch: Option<String>,
+    /// The observed exit status or spawn error.
+    status: String,
+    kind: FailureKind,
+    /// Captured git output; `None` for serial pulls, which stream to the terminal.
+    output: Option<String>,
+    /// Copy-paste command that retries this repository's pull manually.
+    manual: String,
+}
+
+/// One repository that matched the keyword but was not pulled.
+struct SkippedRepo {
+    path: PathBuf,
+    reason: String,
+}
+
+/// Aggregated result of one `rcurl pull` run.
+#[derive(Default)]
+struct PullSummary {
+    scanned: usize,
+    matched: usize,
+    /// Number of pulls listed by `--dry-run`.
+    planned: usize,
+    pulled: usize,
+    failures: Vec<PullFailure>,
+    skipped: Vec<SkippedRepo>,
+    /// Jobs that never ran because git could not be started.
+    aborted: usize,
+}
+
+/// How many trailing output lines are echoed per failure in the summary; the
+/// complete output block is already printed above.
+const FAILURE_OUTPUT_LINES: usize = 12;
+
+/// Output needles that classify a failure, checked in order so the most
+/// specific cause wins over a generic network message.
+const FAILURE_PATTERNS: &[(&[&str], FailureKind)] = &[
+    (
+        &[
+            "could not read username",
+            "could not read password",
+            "authentication failed",
+            "invalid username or password",
+            "permission denied (publickey",
+            "terminal prompts disabled",
+            "unable to get password",
+            "access denied",
+            "returned error: 401",
+            "returned error: 403",
+        ],
+        FailureKind::Authentication,
+    ),
+    (
+        &[
+            "your local changes",
+            "would be overwritten",
+            "unstaged changes",
+            "uncommitted changes",
+            "commit your changes or stash",
+        ],
+        FailureKind::LocalChanges,
+    ),
+    (
+        &[
+            "merge conflict",
+            "automatic merge failed",
+            "fix conflicts",
+            "concluded your merge",
+            "rebase in progress",
+        ],
+        FailureKind::Conflict,
+    ),
+    (
+        &[
+            "divergent branches",
+            "how to reconcile",
+            "not possible to fast-forward",
+            "non-fast-forward",
+        ],
+        FailureKind::Diverged,
+    ),
+    (
+        &[
+            "couldn't find remote ref",
+            "does not appear to be a git repository",
+            "repository not found",
+            "no upstream branch",
+            "no such remote",
+            "no such ref was fetched",
+        ],
+        FailureKind::RemoteMissing,
+    ),
+    (
+        &[
+            "could not resolve host",
+            "failed to connect",
+            "connection timed out",
+            "connection refused",
+            "network is unreachable",
+            "rpc failed",
+            "remote end hung up",
+            "ssl certificate",
+            "tls",
+            "connection reset",
+            "timed out",
+            "early eof",
+        ],
+        FailureKind::Network,
+    ),
+];
+
+impl FailureKind {
+    /// Classify one captured `git pull` output. Anything unrecognised stays
+    /// `Other`, which still reports the repository and its manual command.
+    fn from_output(output: &str) -> Self {
+        let text = output.to_lowercase();
+        for (needles, kind) in FAILURE_PATTERNS {
+            if needles.iter().any(|needle| text.contains(needle)) {
+                return *kind;
+            }
+        }
+        Self::Other
+    }
+
+    /// Short cause shown in the failure summary.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Authentication => "authentication required",
+            Self::LocalChanges => "local changes block the pull",
+            Self::Conflict => "unresolved merge or rebase",
+            Self::Diverged => "local and remote branches diverged",
+            Self::RemoteMissing => "remote repository or branch missing",
+            Self::Network => "network or TLS error",
+            Self::Other => "git pull failed",
+        }
+    }
+
+    /// What to do about it before retrying, or before pulling by hand.
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Authentication => {
+                "run with -j 1 for interactive prompts, or configure an SSH key / credential helper"
+            }
+            Self::LocalChanges => "commit or stash the local changes in that repository first",
+            Self::Conflict => "resolve the conflict and finish the merge/rebase first",
+            Self::Diverged => {
+                "inspect the divergence, then pull manually with --rebase or --no-rebase"
+            }
+            Self::RemoteMissing => {
+                "check the remote and branch with git remote -v / git branch -vv"
+            }
+            Self::Network => "check proxy, VPN and DNS, then retry",
+            Self::Other => "fix the cause shown in the git output above, then retry",
+        }
+    }
 }
 
 /// Pull every git repository under `target` that has a remote URL containing
@@ -93,15 +270,24 @@ pub async fn pull_command(
     let scanned = repos.len();
 
     let mut matched: Vec<RemoteMatch> = Vec::new();
-    let mut skipped: Vec<(PathBuf, String)> = Vec::new();
+    let mut skipped: Vec<SkippedRepo> = Vec::new();
 
     for repo_path in &repos {
         match open_and_match(repo_path, &keyword_lower) {
             Ok(Some(found)) => matched.push(found),
             Ok(None) => {}
-            Err(err) => skipped.push((repo_path.clone(), format!("cannot open repository: {err}"))),
+            Err(err) => skipped.push(SkippedRepo {
+                path: repo_path.clone(),
+                reason: format!("cannot open repository: {err}"),
+            }),
         }
     }
+
+    let mut summary = PullSummary {
+        scanned,
+        matched: matched.len(),
+        ..PullSummary::default()
+    };
 
     if matched.is_empty() {
         println!(
@@ -109,8 +295,8 @@ pub async fn pull_command(
             keyword,
             root.display()
         );
-        println!("Scanned {} git repositories.", scanned);
-        println!("Time elapsed: {}", format_duration(start.elapsed()));
+        summary.skipped = skipped;
+        print_pull_summary(&summary, root, keyword, dry_run, start.elapsed());
         return Ok(RcurlResponse::Pull(()));
     }
 
@@ -128,8 +314,6 @@ pub async fn pull_command(
         .count();
     let workers = effective_workers(jobs, runnable);
 
-    let mut pulled = 0usize;
-    let mut failed: Vec<(PathBuf, String)> = Vec::new();
     let mut fatal: Option<anyhow::Error> = None;
 
     if dry_run || workers == 1 {
@@ -145,27 +329,44 @@ pub async fn pull_command(
             );
             let Some(args) = args else {
                 println!("      skipped: not on a branch");
-                skipped.push((found.path.clone(), "not on a branch".to_string()));
+                skipped.push(SkippedRepo {
+                    path: found.path.clone(),
+                    reason: "not on a branch (detached HEAD)".to_string(),
+                });
                 continue;
             };
 
             if dry_run {
-                let mut command = format!("git -C {} pull --no-edit", found.path.display());
-                for arg in &args {
-                    command.push(' ');
-                    command.push_str(arg);
-                }
-                println!("      {command}");
+                println!("      {}", manual_pull_command(&found.path, &args));
+                summary.planned += 1;
                 continue;
             }
 
             match run_git_pull(&found.path, &args) {
-                Ok(status) if status.success() => pulled += 1,
-                Ok(status) => {
-                    failed.push((found.path.clone(), format!("git pull exited with {status}")))
-                }
+                Ok(status) if status.success() => summary.pulled += 1,
+                Ok(status) => summary.failures.push(PullFailure {
+                    path: found.path.clone(),
+                    remote: found.remote.clone(),
+                    url: found.url.clone(),
+                    branch: found.branch.clone(),
+                    status: format!("git pull exited with {status}"),
+                    kind: FailureKind::Other,
+                    // Serial pulls stream git's output, so only the exit status
+                    // is available for the summary.
+                    output: None,
+                    manual: manual_pull_command(&found.path, &args),
+                }),
                 Err(err) => {
-                    failed.push((found.path.clone(), err.to_string()));
+                    summary.failures.push(PullFailure {
+                        path: found.path.clone(),
+                        remote: found.remote.clone(),
+                        url: found.url.clone(),
+                        branch: found.branch.clone(),
+                        status: format!("failed to run git: {err}"),
+                        kind: FailureKind::Other,
+                        output: None,
+                        manual: manual_pull_command(&found.path, &args),
+                    });
                     fatal = Some(anyhow!(
                         "pull: failed to run git ({}). Is git installed and on PATH?",
                         err
@@ -187,9 +388,13 @@ pub async fn pull_command(
                     path: found.path.clone(),
                     remote: found.remote.clone(),
                     url: found.url.clone(),
+                    branch: found.branch.clone(),
                     args,
                 }),
-                None => skipped.push((found.path.clone(), "not on a branch".to_string())),
+                None => skipped.push(SkippedRepo {
+                    path: found.path.clone(),
+                    reason: "not on a branch (detached HEAD)".to_string(),
+                }),
             }
         }
 
@@ -203,10 +408,17 @@ pub async fn pull_command(
         let attempts = run_jobs_parallel(pending, workers)?;
         for attempt in &attempts {
             match &attempt.result {
-                PullResult::Pulled { .. } => pulled += 1,
-                PullResult::Failed { reason, .. } => {
-                    failed.push((attempt.job.path.clone(), reason.clone()));
-                }
+                PullResult::Pulled { .. } => summary.pulled += 1,
+                PullResult::Failed { reason, output } => summary.failures.push(PullFailure {
+                    path: attempt.job.path.clone(),
+                    remote: attempt.job.remote.clone(),
+                    url: attempt.job.url.clone(),
+                    branch: attempt.job.branch.clone(),
+                    status: reason.clone(),
+                    kind: FailureKind::from_output(output),
+                    output: Some(output.clone()).filter(|output| !output.trim().is_empty()),
+                    manual: manual_pull_command(&attempt.job.path, &attempt.job.args),
+                }),
                 PullResult::SpawnFailed { error } => {
                     if fatal.is_none() {
                         fatal = Some(anyhow!(
@@ -215,48 +427,13 @@ pub async fn pull_command(
                         ));
                     }
                 }
-                PullResult::Cancelled => {}
+                PullResult::Cancelled => summary.aborted += 1,
             }
         }
     }
 
-    println!();
-    println!("{}", "-".repeat(60));
-    println!(
-        "Matched {} of {} git repositories under: {}",
-        total,
-        scanned,
-        root.display()
-    );
-    if dry_run {
-        println!("Dry run: no repository was modified.");
-    } else {
-        println!(
-            "Pulled {}, failed {}, skipped {}.",
-            pulled,
-            failed.len(),
-            skipped.len()
-        );
-    }
-
-    if !failed.is_empty() {
-        println!();
-        println!("Failed:");
-        for (path, reason) in &failed {
-            println!("  {} ({})", path.display(), reason);
-        }
-    }
-
-    if !skipped.is_empty() {
-        println!();
-        println!("Skipped:");
-        for (path, reason) in &skipped {
-            println!("  {} ({})", path.display(), reason);
-        }
-    }
-
-    println!();
-    println!("Time elapsed: {}", format_duration(start.elapsed()));
+    summary.skipped = skipped;
+    print_pull_summary(&summary, root, keyword, dry_run, start.elapsed());
 
     if let Some(err) = fatal {
         return Err(err);
@@ -381,6 +558,136 @@ fn captured_output_text(stdout: &[u8], stderr: &[u8]) -> String {
         text.push_str(&stderr);
     }
     text
+}
+
+/// Print the run summary: counts, then each failure with its cause, hint and a
+/// copy-paste manual pull command, then skipped repositories.
+fn print_pull_summary(
+    summary: &PullSummary,
+    root: &Path,
+    keyword: &str,
+    dry_run: bool,
+    elapsed: std::time::Duration,
+) {
+    println!();
+    println!("{}", "-".repeat(76));
+    println!("Summary");
+    println!("{}", "-".repeat(76));
+    println!(
+        "Scanned   : {} git repositories under {}",
+        summary.scanned,
+        root.display()
+    );
+    println!(
+        "Matched   : {} (remote URL contains \"{}\")",
+        summary.matched, keyword
+    );
+    if dry_run {
+        println!(
+            "Planned   : {} git pull commands listed above; nothing was modified",
+            summary.planned
+        );
+    } else {
+        println!("Pulled    : {}", summary.pulled);
+        println!("Failed    : {}", summary.failures.len());
+    }
+    println!("Skipped   : {}", summary.skipped.len());
+    if summary.aborted > 0 {
+        println!("Not tried : {} (git could not be started)", summary.aborted);
+    }
+    println!("Elapsed   : {}", format_duration(elapsed));
+
+    print_failures(&summary.failures);
+    print_skipped(&summary.skipped);
+    print_manual_commands(&summary.failures);
+}
+
+/// Print every failed repository with the classified cause and a manual command.
+fn print_failures(failures: &[PullFailure]) {
+    if failures.is_empty() {
+        return;
+    }
+
+    println!();
+    println!(
+        "Failed ({}) - fix the cause, or pull these repositories manually:",
+        failures.len()
+    );
+    for (index, failure) in failures.iter().enumerate() {
+        println!("  {}. {}", index + 1, failure.path.display());
+        println!("     remote : {} -> {}", failure.remote, failure.url);
+        if let Some(branch) = &failure.branch {
+            println!("     branch : {branch}");
+        }
+        println!("     status : {}", failure.status);
+        println!("     cause  : {}", failure.kind.label());
+        println!("     hint   : {}", failure.kind.hint());
+        println!("     manual : {}", failure.manual);
+
+        if let Some(output) = &failure.output {
+            let lines = tail_lines(output, FAILURE_OUTPUT_LINES);
+            if !lines.is_empty() {
+                println!("     output :");
+                for line in lines {
+                    println!("       {line}");
+                }
+            }
+        }
+    }
+}
+
+/// Print every repository that matched but was not pulled.
+fn print_skipped(skipped: &[SkippedRepo]) {
+    if skipped.is_empty() {
+        return;
+    }
+
+    println!();
+    println!("Skipped ({}):", skipped.len());
+    for (index, entry) in skipped.iter().enumerate() {
+        println!(
+            "  {}. {} - {}",
+            index + 1,
+            entry.path.display(),
+            entry.reason
+        );
+    }
+}
+
+/// Print the failed pulls as ready-to-copy commands.
+fn print_manual_commands(failures: &[PullFailure]) {
+    if failures.is_empty() {
+        return;
+    }
+
+    println!();
+    println!("Manual pull commands:");
+    for failure in failures {
+        println!("  {}", failure.manual);
+    }
+}
+
+/// Build the command a user can run by hand to retry one repository's pull.
+fn manual_pull_command(path: &Path, extra: &[String]) -> String {
+    let mut command = format!("git -C \"{}\" pull --no-edit", path.display());
+    for arg in extra {
+        command.push(' ');
+        command.push_str(arg);
+    }
+    command
+}
+
+/// Last `max` non-empty lines of `text`, so the failure summary stays readable
+/// while still carrying git's own error message.
+fn tail_lines(text: &str, max: usize) -> Vec<String> {
+    let lines: Vec<String> = text
+        .split(['\r', '\n'])
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    let start = lines.len().saturating_sub(max);
+    lines[start..].to_vec()
 }
 
 /// Recursively collect every git repository root under `root`.
@@ -687,5 +994,82 @@ mod tests {
     fn captured_output_text_handles_invalid_utf8() {
         let text = captured_output_text(&[0xff], b"");
         assert!(text.contains('\u{fffd}'));
+    }
+
+    #[test]
+    fn failure_kind_classifies_common_git_errors() {
+        assert_eq!(
+            FailureKind::from_output(
+                "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+            ),
+            FailureKind::Authentication
+        );
+        assert_eq!(
+            FailureKind::from_output(
+                "error: Your local changes to the following files would be overwritten by merge:"
+            ),
+            FailureKind::LocalChanges
+        );
+        assert_eq!(
+            FailureKind::from_output("CONFLICT (content): Merge conflict in src/main.rs"),
+            FailureKind::Conflict
+        );
+        assert_eq!(
+            FailureKind::from_output("fatal: Need to specify how to reconcile divergent branches."),
+            FailureKind::Diverged
+        );
+        assert_eq!(
+            FailureKind::from_output("fatal: couldn't find remote ref main"),
+            FailureKind::RemoteMissing
+        );
+        assert_eq!(
+            FailureKind::from_output(
+                "Your configuration specifies to merge with the ref 'refs/heads/main'\nfrom the remote, but no such ref was fetched."
+            ),
+            FailureKind::RemoteMissing
+        );
+        assert_eq!(
+            FailureKind::from_output(
+                "fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com"
+            ),
+            FailureKind::Network
+        );
+        assert_eq!(
+            FailureKind::from_output("fatal: something entirely different"),
+            FailureKind::Other
+        );
+    }
+
+    #[test]
+    fn failure_kind_prefers_the_most_specific_cause() {
+        // A 403 arrives wrapped in a transport message; the credential cause wins.
+        assert_eq!(
+            FailureKind::from_output(
+                "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 403"
+            ),
+            FailureKind::Authentication
+        );
+    }
+
+    #[test]
+    fn manual_pull_command_quotes_the_path_and_keeps_extra_args() {
+        assert_eq!(
+            manual_pull_command(
+                Path::new("C:\\code\\a b"),
+                &["upstream".to_string(), "dev".to_string()]
+            ),
+            "git -C \"C:\\code\\a b\" pull --no-edit upstream dev"
+        );
+        assert_eq!(
+            manual_pull_command(Path::new("repo"), &[]),
+            "git -C \"repo\" pull --no-edit"
+        );
+    }
+
+    #[test]
+    fn tail_lines_keeps_the_trailing_non_empty_lines() {
+        assert_eq!(tail_lines("a\n\nb\r\nc\n", 2), vec!["b", "c"]);
+        assert_eq!(tail_lines("", 5), Vec::<String>::new());
+        assert_eq!(tail_lines("a\nb", 10), vec!["a", "b"]);
     }
 }
