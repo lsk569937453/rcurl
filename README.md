@@ -18,7 +18,7 @@
 - Request timing breakdown (--time)
 - Proxy support (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY)
 - Quick commands: ping, disk, count, git statistics, parallel git pull, telnet, DNS lookup, WHOIS, port query, load testing, clean build artifacts
-- Interactive mode with request history
+- Interactive mode with searchable request history
 
 ## rcurl vs curl
 
@@ -28,7 +28,7 @@ rcurl is a modern reimagining of curl, built with Rust for enhanced safety, bett
 | :--- | :--- | :--- |
 | **Language** | Rust (Memory-safe, modern) | C (Legacy, manual memory management) |
 | **Core Functionality** | Full curl-compatible HTTP/S/FTP/SFTP | Full protocol support |
-| **Interactive Mode** | Request history & replay | Not available |
+| **Interactive Mode** | Searchable request history & replay | Not available |
 | **Timing Analysis** | Multi-phase breakdown (DNS, TCP, TLS, etc.) | Basic time_total only |
 | **Network Diagnostics** | Built-in ping, DNS, whois, telnet | Requires external tools |
 | **Developer Experience** | Colored output, progress bars, cleaner CLI | Traditional Unix style |
@@ -328,11 +328,24 @@ rcurl https://example.com --noproxy
 
 ### Interactive Mode
 
-When no URL or command is provided, `rcurl` enters interactive mode, allowing you to select and execute previous requests from history:
+When no URL or command is provided, `rcurl` enters interactive mode, allowing you to search, select and execute previous requests from history:
 
 ```bash
 rcurl
 ```
+
+| Key | Action |
+| --- | --- |
+| `↑` / `k`, `↓` / `j` | Move the selection |
+| `Home` / `End` | Jump to the first / last entry |
+| `/` | Enter search mode and filter the history as you type |
+| `Backspace` / `Ctrl+U` | Delete the last character / clear the search |
+| `Esc` (while searching) | Clear the search and return to the list |
+| `Enter` | Run the selected request |
+| `q` / `Esc` (in the list) | Quit without running anything |
+| `Ctrl+C` | Quit without running anything |
+
+The search is case-insensitive and matches the full recorded command (method, URL, headers, body, ...). Whitespace-separated keywords must all match, so `post example` finds a `POST` request to `example.com`. While searching, every character - including `q`, `j` and `k` - is typed into the search box; use `↑`/`↓` to move through the matches.
 
 ## Contributing
 
